@@ -1,0 +1,186 @@
+# Requirements
+
+This document enumerates the functional and non-functional requirements for
+`aws-model-router`. It is the reference used to judge whether a phase's deliverables are
+complete, and is expected to evolve as later phases add detail (particularly security,
+observability, and cost requirements in Phases 6–7).
+
+## Functional requirements
+
+### FR-1 — Centralized request intake
+
+FR-1.1. Applications submit inference requests to the router; they do not call Amazon
+Bedrock (or any other model provider) directly.
+
+FR-1.2. The router accepts a normalized request containing an application identity, a
+message list (or prompt), a set of routing requirements, and optional metadata
+(conversation ID, idempotency key, use case).
+
+FR-1.3. The router validates and normalizes every request before any routing decision is
+made. Malformed requests are rejected with a structured error and never reach the
+routing or invocation stages.
+
+### FR-2 — Policy-driven routing
+
+FR-2.1. Each application has a routing policy that determines which logical capabilities,
+quality tiers, models, and cost/token limits it may use. Client-supplied requirements are
+constraints to satisfy, not instructions the router blindly obeys — the effective request
+is the intersection of what the client asked for and what the application's policy
+permits.
+
+FR-2.2. The router resolves eligible model candidates by filtering on: capability match,
+model allowlist membership, token limits, and estimated cost limits.
+
+FR-2.3. The router scores and selects among eligible candidates using a documented,
+deterministic routing strategy (see `docs/adr/0007-deterministic-explainable-routing.md`).
+
+FR-2.4. Every routing decision carries one or more stable, machine-readable reason codes
+explaining why a route was selected, and why alternatives were not.
+
+### FR-3 — Model invocation
+
+FR-3.1. The router invokes the selected model through a provider-independent
+`ModelProvider` interface; Amazon Bedrock (via the Converse API) is the first
+implementation.
+
+FR-3.2. Clients cannot submit raw provider model IDs. They request logical capabilities;
+trusted, server-side configuration resolves capabilities to specific model aliases,
+model IDs, or inference profiles.
+
+FR-3.3. The router normalizes provider-specific responses (content, stop reason, token
+usage) into a stable internal response shape, independent of which provider served the
+request.
+
+### FR-4 — Fallback
+
+FR-4.1. When the primary model invocation fails with an eligible, retryable failure
+(throttling, transient provider error, eligible timeout), the router selects an approved
+fallback per the application's fallback policy.
+
+FR-4.2. Fallback does not occur for validation failures, authorization/authentication
+failures, policy denials, cost-limit rejections, unsupported-capability rejections, or
+malformed configuration.
+
+FR-4.3. Retries and fallback attempts are bounded (maximum attempts, retry budget) to
+prevent retry/cost amplification.
+
+### FR-5 — Experimentation
+
+FR-5.1. The router supports deterministic, weighted experiment routing: a stable subject
+key (e.g. application + conversation, or an explicit experiment key) is hashed to assign
+a consistent cohort across repeated calls.
+
+FR-5.2. Experiment allocation is explainable — the routing decision records which
+experiment (if any) influenced route selection.
+
+### FR-6 — Idempotency
+
+FR-6.1. Clients may supply an idempotency key. Given the same application, idempotency
+key, and normalized request, the router must not perform unbounded duplicate model
+invocations.
+
+FR-6.2. Whether a cached response may be returned for a repeated idempotent request is a
+policy decision per application, not a default behavior (see
+`docs/adr/0008-metadata-only-audit-records-by-default.md` and the idempotency ADR added in
+Phase 4).
+
+### FR-7 — Auditability
+
+FR-7.1. Every routing decision and invocation attempt is recorded as sanitized,
+structured metadata (not raw prompts/responses) sufficient to explain what happened,
+when, and why.
+
+FR-7.2. Authorized callers can retrieve a sanitized routing decision by ID
+(`GET /v1/decisions/{decisionId}`).
+
+### FR-8 — Explainability without disclosure
+
+FR-8.1. The router can explain why a route was selected (reason codes, evaluated
+candidates, policy version) without exposing internal secrets, credentials, or
+unrestricted provider configuration.
+
+### FR-9 — Route evaluation without invocation
+
+FR-9.1. Clients (or operators) can evaluate what route would be selected for a given
+request without invoking a model, via `POST /v1/routes/evaluate`.
+
+### FR-10 — Capability discovery
+
+FR-10.1. Clients can discover the logical capabilities and service tiers available to
+them via `GET /v1/models`, without seeing raw provider model IDs or unrelated
+applications' configuration.
+
+## Non-functional requirements
+
+### NFR-1 — Cost
+
+NFR-1.1. The default deployment uses only pay-per-request billing (Lambda, API Gateway,
+DynamoDB on-demand, Bedrock on-demand). No resource incurs cost while idle beyond storage
+and negligible fixed charges (e.g. CloudWatch Logs storage under retention limits).
+
+NFR-1.2. No EC2, ECS, EKS, OpenSearch, Aurora, ElastiCache, NAT Gateway, or provisioned
+Bedrock throughput is used in the base architecture.
+
+NFR-1.3. All cost figures produced by the router (estimated cost) are explicitly labeled
+as estimates and are never presented as equivalent to AWS billing.
+
+### NFR-2 — Security
+
+NFR-2.1. Clients cannot select arbitrary provider model IDs; only trusted, policy-resolved
+aliases.
+
+NFR-2.2. All AWS resources follow least-privilege IAM; Lambda execution roles are scoped
+to the specific resources and, where feasible, specific model/inference-profile ARNs they
+require.
+
+NFR-2.3. Authentication is not based on API keys as a primary identity mechanism. See the
+authorization ADR added in Phase 5.
+
+NFR-2.4. No raw prompt or response content is logged or persisted by default.
+
+### NFR-3 — Reliability
+
+NFR-3.1. Bounded retries and bounded fallback prevent unbounded retry/cost amplification
+during provider incidents.
+
+NFR-3.2. The router degrades predictably: when no eligible model exists, it returns a
+clear, typed error (`NO_ELIGIBLE_MODEL`) rather than an ambiguous failure.
+
+### NFR-4 — Observability
+
+NFR-4.1. All logs are structured JSON with a fixed, documented set of safe attributes.
+
+NFR-4.2. Metrics use low-cardinality dimensions only; request/decision/user/conversation
+IDs are never used as metric dimensions.
+
+### NFR-5 — Testability
+
+NFR-5.1. The domain and application layers are testable without AWS credentials, a
+network connection, or a live Bedrock endpoint.
+
+NFR-5.2. Provider adapters are tested with fakes or `botocore.stub.Stubber`; any test
+requiring a real AWS call is explicitly opt-in and excluded from CI.
+
+### NFR-6 — Extensibility
+
+NFR-6.1. A new model provider can be added by implementing the `ModelProvider` interface,
+without changes to the core routing domain logic.
+
+NFR-6.2. Model capabilities (token limits, tool use, structured output, streaming,
+modalities) are explicit, per-model configuration — never assumed uniform across models.
+
+### NFR-7 — Determinism and explainability
+
+NFR-7.1. Given the same request, policy, and model health/configuration snapshot, routing
+decisions are deterministic and reproducible.
+
+NFR-7.2. The base implementation does not use opaque machine-learning-based routing;
+routing strategies are deterministic and their reasoning is enumerable via reason codes.
+
+### NFR-8 — Operability
+
+NFR-8.1. The system can be deployed and torn down entirely via documented commands
+(CDK deploy / destroy), with no manual, undocumented console steps required.
+
+NFR-8.2. Development and production environments are isolated (separate stacks,
+configuration, and IAM roles).

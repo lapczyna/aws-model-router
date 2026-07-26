@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/lapczynski.artur/aws-model-router/security/advisories/new
+    about: Please report security vulnerabilities privately — see SECURITY.md. Do not open a public issue.
+  - name: Architecture / design question
+    url: https://github.com/lapczynski.artur/aws-model-router/discussions
+    about: Use Discussions for open-ended design questions or proposals that aren't yet a concrete bug or feature.
