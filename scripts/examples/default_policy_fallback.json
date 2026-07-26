@@ -1,0 +1,12 @@
+{
+  "application_id": "unregistered-app",
+  "messages": [
+    { "role": "user", "content": "Summarize this incident report in two sentences." }
+  ],
+  "requirements": {
+    "capability": "economical-text"
+  },
+  "metadata": {
+    "use_case": "incident-summary"
+  }
+}

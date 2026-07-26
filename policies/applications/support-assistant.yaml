@@ -1,0 +1,22 @@
+# Application-specific policy for "support-assistant" (see docs/architecture/api-contracts.md
+# for the request/response examples this application is used in).
+
+policy_id: support-assistant-default
+policy_version: 3
+
+allowed_capabilities: [economical-text, balanced-text]
+allowed_model_aliases: [economical-text-primary, balanced-text-primary]
+allowed_quality_tiers: [standard, premium]
+default_quality_tier: standard
+
+maximum_estimated_cost_usd: "0.01"
+maximum_output_tokens: 1000
+
+routing_strategy: lowest_cost
+latency_preference: balanced
+
+allow_client_overrides:
+  quality_tier: true
+  maximum_estimated_cost_usd: true
+  maximum_output_tokens: true
+  latency_preference: true

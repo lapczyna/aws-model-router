@@ -11,9 +11,12 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 1 — Foundation and architecture.** This phase establishes structure,
-> documentation, ADRs, and tooling. No AWS infrastructure is deployed and no model is
-> invoked yet. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap.
+> **Status: Phase 2 — Domain model and local routing engine.** The routing engine —
+> domain models, policy/catalogue schemas, candidate filtering, and three deterministic
+> routing strategies — runs entirely locally, with zero AWS credentials, via
+> `scripts/evaluate_route.py` (see [below](#try-it-locally)). No AWS infrastructure is
+> deployed and no model is invoked yet. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the
+> full phased roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -88,8 +91,25 @@ observability, testability, extensibility, and determinism requirements.
 
 Typed domain concepts (`InferenceRequest`, `RoutingPolicy`, `ModelDefinition`,
 `RoutingDecision`, reason codes, etc.) and the core interfaces they're built around are
-defined in [`docs/architecture/domain-glossary.md`](docs/architecture/domain-glossary.md).
-Implementation begins in Phase 2.
+defined in [`docs/architecture/domain-glossary.md`](docs/architecture/domain-glossary.md)
+and implemented as immutable, `mypy --strict`-typed Pydantic models under
+[`src/domain/`](src/domain/), with zero AWS SDK imports (ADR-002).
+
+## Try it locally
+
+Evaluate a routing decision without any AWS credentials, using the sample policies and
+model catalogue under [`policies/`](policies/):
+
+```bash
+pip install -e ".[dev]"
+python scripts/evaluate_route.py --request scripts/examples/support_assistant_balanced.json
+```
+
+This resolves the calling application's policy, filters the model catalogue by
+capability/allowlist/quality-tier/token/cost, and prints a fully-explained
+`RoutingDecision` — the same decision `POST /v1/routes/evaluate` will return once the
+HTTP API exists (Phase 5). See [`scripts/examples/`](scripts/examples/) for more
+scenarios (cost-limit rejection, policy fallback, capability not permitted).
 
 ## Architecture decisions
 
@@ -127,7 +147,7 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── constructs/
 │   └── tests/
 ├── policies/                # Version-controlled routing policy & model catalogue configuration
-├── scripts/                 # Developer and operational scripts
+├── scripts/                 # evaluate_route.py (local CLI) + example requests
 ├── src/
 │   ├── domain/               # Pure Python domain models, routing strategies, reason codes
 │   ├── application/          # Orchestration: validation → policy → filter → cost → strategy → invoke
@@ -213,8 +233,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 
 | Phase | Focus |
 |---|---|
-| 1 | Foundation and architecture *(this phase)* |
-| 2 | Domain model and local routing engine (no AWS) |
+| 1 | Foundation and architecture |
+| 2 | Domain model and local routing engine (no AWS) *(this phase)* |
 | 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) |
 | 4 | Fallback, experimentation, and idempotency |
 | 5 | AWS CDK infrastructure and serverless API |

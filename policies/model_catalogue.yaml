@@ -1,0 +1,81 @@
+# Model catalogue (ADR-006, ADR-010).
+#
+# Clients never see this file or any value in it — they request logical capabilities
+# (e.g. "balanced-text"), and the router resolves them to a model_alias here. Pricing
+# values MUST be quoted strings (see src/domain/money.py) so they parse as exact
+# Decimal, never as a lossy binary float.
+#
+# model_alias resolution.value holds a real Bedrock model ID purely as illustrative,
+# realistic configuration data — Phase 2 never invokes it. Invocation begins Phase 3.
+
+catalogue_version: 1
+
+models:
+  - model_alias: economical-text-primary
+    provider: bedrock
+    region: us-east-1
+    resolution:
+      type: direct_model_id
+      value: anthropic.claude-3-haiku-20240307-v1:0
+    capabilities:
+      capability_tags: [economical-text]
+      quality_tier: standard
+      max_input_tokens: 200000
+      max_output_tokens: 4096
+      supports_tool_use: false
+      supports_structured_output: false
+      supports_streaming: true
+      supported_modalities: [text]
+    pricing:
+      currency: USD
+      input_price_per_1k_tokens: "0.00025"
+      output_price_per_1k_tokens: "0.00125"
+      pricing_version: 1
+    health:
+      status: healthy
+
+  - model_alias: balanced-text-primary
+    provider: bedrock
+    region: us-east-1
+    resolution:
+      type: direct_model_id
+      value: anthropic.claude-3-5-sonnet-20240620-v1:0
+    capabilities:
+      capability_tags: [balanced-text]
+      quality_tier: standard
+      max_input_tokens: 200000
+      max_output_tokens: 4096
+      supports_tool_use: true
+      supports_structured_output: true
+      supports_streaming: true
+      supported_modalities: [text]
+    pricing:
+      currency: USD
+      input_price_per_1k_tokens: "0.003"
+      output_price_per_1k_tokens: "0.015"
+      pricing_version: 1
+    health:
+      status: healthy
+
+  - model_alias: advanced-reasoning-primary
+    provider: bedrock
+    region: us-east-1
+    resolution:
+      type: direct_model_id
+      value: anthropic.claude-3-opus-20240229-v1:0
+    capabilities:
+      capability_tags: [advanced-reasoning]
+      quality_tier: premium
+      max_input_tokens: 200000
+      max_output_tokens: 4096
+      supports_tool_use: true
+      supports_structured_output: true
+      supports_streaming: true
+      supported_modalities: [text]
+    pricing:
+      currency: USD
+      input_price_per_1k_tokens: "0.015"
+      output_price_per_1k_tokens: "0.075"
+      pricing_version: 1
+    health:
+      status: healthy

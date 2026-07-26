@@ -1,0 +1,10 @@
+policy_id: app-a-specific
+policy_version: 1
+allowed_capabilities: [balanced-text]
+allowed_model_aliases: [model-b]
+allowed_quality_tiers: [standard]
+default_quality_tier: standard
+maximum_estimated_cost_usd: "0.05"
+maximum_output_tokens: 800
+routing_strategy: preferred_model
+preferred_model_alias: model-b

@@ -1,0 +1,15 @@
+{
+  "application_id": "support-assistant",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Perform a deep root-cause analysis of this multi-service outage."
+    }
+  ],
+  "requirements": {
+    "capability": "advanced-reasoning"
+  },
+  "metadata": {
+    "use_case": "root-cause-analysis"
+  }
+}

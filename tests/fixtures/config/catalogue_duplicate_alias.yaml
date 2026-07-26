@@ -1,0 +1,33 @@
+catalogue_version: 1
+models:
+  - model_alias: model-a
+    provider: bedrock
+    region: us-east-1
+    resolution:
+      type: direct_model_id
+      value: fake.model-a-v1:0
+    capabilities:
+      capability_tags: [balanced-text]
+      quality_tier: standard
+      max_input_tokens: 1000
+      max_output_tokens: 500
+    pricing:
+      input_price_per_1k_tokens: "0.001"
+      output_price_per_1k_tokens: "0.002"
+      pricing_version: 1
+
+  - model_alias: model-a
+    provider: bedrock
+    region: us-east-1
+    resolution:
+      type: direct_model_id
+      value: fake.model-a-duplicate-v1:0
+    capabilities:
+      capability_tags: [economical-text]
+      quality_tier: standard
+      max_input_tokens: 1000
+      max_output_tokens: 500
+    pricing:
+      input_price_per_1k_tokens: "0.0005"
+      output_price_per_1k_tokens: "0.001"
+      pricing_version: 1

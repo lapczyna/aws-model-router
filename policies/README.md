@@ -1,18 +1,28 @@
 # Policies
 
 Version-controlled, static routing policy and model catalogue configuration used for
-local development, tests, and the Phase 2 CLI route evaluator — no AWS dependency.
+local development, tests, and the CLI route evaluator (`scripts/evaluate_route.py`) —
+no AWS dependency.
 
-This directory holds, once populated in Phase 2:
+* [`model_catalogue.yaml`](model_catalogue.yaml) — the model catalogue: logical
+  capability → model alias → concrete identifier (direct model ID / inference profile)
+  mappings, `ModelCapabilities`, and versioned `ModelPricing`. Loaded by
+  `adapters.config.local_model_catalogue.LocalFileModelCatalogue`.
+* [`default_policy.yaml`](default_policy.yaml) — the fallback `RoutingPolicy` used for
+  any application without its own file below.
+* [`applications/`](applications/) — one file per application, named
+  `<applicationId>.yaml` (or `.yml`/`.json`), each a `RoutingPolicy`. Loaded by
+  `adapters.config.local_policy_repository.LocalFileRoutingPolicyRepository`.
 
-* **Application routing policies** — per-application allowed capabilities, model
-  allowlists, quality tiers, cost/token limits, fallback policy, experiment configuration.
-* **Model catalogue** — logical capability → model alias → concrete identifier
-  (direct model ID / inference profile) mappings, `ModelCapabilities`, and versioned
-  `ModelPricing`.
+Fallback chains and experiment configuration are added to this schema in Phase 4, once
+`FallbackPolicy` and `ExperimentPolicy` are implemented.
+
+Pricing values in these files must be quoted strings (e.g. `"0.00025"`), not bare
+numbers — see `src/domain/money.py` for why (unquoted YAML numbers parse as a lossy
+binary float, which is rejected at validation time).
 
 See [`docs/architecture/domain-glossary.md`](../docs/architecture/domain-glossary.md) for
-the schema these files implement, and
+the domain model these files implement, and
 [ADR-010](../docs/adr/0010-configuration-storage-approach.md) for why static,
 version-controlled configuration is used here versus DynamoDB/Parameter Store for
-deployed environments.
+deployed environments (Phase 5).

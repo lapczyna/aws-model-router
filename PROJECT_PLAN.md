@@ -89,12 +89,29 @@ configuration (never hardcoded), comprehensive unit tests (see full list in the 
 scope), all runnable without AWS credentials. No Bedrock calls, no AWS infrastructure.
 
 **DoD:**
-- [ ] All domain models from `docs/architecture/domain-glossary.md` implemented and typed
-- [ ] All routing strategies listed above implemented and unit-tested
-- [ ] CLI route evaluator runs with zero AWS credentials/network access
-- [ ] Every reason code in the glossary is producible and asserted in a test
-- [ ] `make ci` passes
-- [ ] Committed and pushed
+- [x] All domain models from `docs/architecture/domain-glossary.md` needed for routing
+      (without invocation) implemented and typed — `ModelProvider`/`ProviderRequest`/
+      `ProviderResponse`, `ModelHealthRepository`, `RoutingDecisionRepository`, and
+      `MetricsPublisher` are deliberately deferred to the phase that first implements
+      and consumes them (3, 4, 4, 6 respectively), rather than defined speculatively
+      ahead of a caller
+- [x] All three Phase 2 routing strategies (preferred-model, lowest-cost, quality-tier)
+      implemented and unit-tested
+- [x] CLI route evaluator (`scripts/evaluate_route.py`) runs with zero AWS
+      credentials/network access
+- [x] Reason codes reachable by Phase 2 logic are producible and asserted in tests:
+      `CAPABILITY_MATCH`, `MODEL_ALLOWED`, `MODEL_NOT_ALLOWED`, `WITHIN_COST_LIMIT`,
+      `COST_LIMIT_EXCEEDED`, `TOKEN_LIMIT_EXCEEDED`, `LOWEST_ESTIMATED_COST`,
+      `QUALITY_TIER_MATCH`, `NO_ELIGIBLE_MODEL`, `REQUIRED_CAPABILITY_UNAVAILABLE` (10 of
+      18). The remaining 8 — `LATENCY_PREFERENCE_MATCH`, `REGION_POLICY_MATCH`,
+      `MODEL_UNHEALTHY`, `MODEL_THROTTLED`, `MODEL_UNAVAILABLE`, `FALLBACK_SELECTED`,
+      `EXPERIMENT_ROUTE_SELECTED`, `INVALID_ROUTING_POLICY` — require health, provider
+      invocation, fallback, or experiment logic that doesn't exist until Phases 3–4; the
+      original wording of this DoD item ("every reason code") overstated Phase 2 scope
+      and is corrected here rather than left misleading
+- [x] `make ci` passes: Ruff, Black, mypy --strict, and pytest (83 tests, 98% coverage
+      on `src/`) all clean
+- [ ] Committed and pushed (pending user confirmation)
 
 ### Phase 3 — Bedrock provider adapter
 `BedrockModelProvider` behind `ModelProvider`, Converse API request/response mapping,
@@ -228,13 +245,13 @@ traffic unvalidated.
 
 | Phase | Status | Commit / tag |
 |---|---|---|
-| Phase 1 — Foundation and architecture | Complete | `b059a41` (+ `ee55487` username fix) |
+| Phase 1 — Foundation and architecture | Complete | `b059a41` (+ `ee55487` username fix, `9210c11` plan update) |
+| Phase 2 — Domain model and local routing engine | Deliverables complete, pending commit confirmation | _pending_ |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 2 | Domain model and local routing engine |
 | 3 | Bedrock provider adapter |
 | 4 | Fallback, experimentation, and idempotency |
 | 5 | AWS CDK infrastructure and serverless API |
@@ -258,3 +275,20 @@ incorrect:
 * **Package layout**: `src/domain`, `src/application`, `src/adapters`, `src/handlers`,
   `src/shared` are top-level installable packages (no shared umbrella package name),
   matching the repository structure specified for this project.
+* **Domain model field casing**: internal Python domain models use `snake_case` field
+  names (idiomatic Python, and required to avoid Ruff's `N815`/pep8-naming warnings on
+  mixed-case attributes). The public HTTP API's `camelCase` JSON contract
+  (`docs/architecture/api-contracts.md`) is a separate, external representation that a
+  Lambda handler will translate to/from starting in Phase 5 — the two are not expected
+  to share field names verbatim.
+* **Deferred protocols** (Phase 2): `ModelProvider`/`ProviderRequest`/`ProviderResponse`,
+  `ModelHealthRepository`, and `RoutingDecisionRepository`/`MetricsPublisher` were *not*
+  added to `src/domain/ports.py` in Phase 2 even though `docs/architecture/overview.md`
+  lists them as eventual core interfaces — they're introduced alongside their first real
+  implementation and caller in Phases 3, 4, and 4/6 respectively, to avoid speculative,
+  untested interfaces with no consumer.
+* **Health filtering**: model health (`ModelHealth`/`MODEL_UNHEALTHY`) is modeled in the
+  catalogue schema (Phase 2) but not yet wired into candidate filtering — no
+  `ModelHealthRepository` exists yet to source a live signal from. Wiring it in is
+  Phase 3/4 scope, once there's a real health signal (provider invocation outcomes) to
+  filter on.

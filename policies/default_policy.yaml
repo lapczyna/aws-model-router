@@ -1,0 +1,24 @@
+# Default routing policy — used for any application without its own file under
+# applications/. Deliberately conservative: a single, cheap, allowlisted model.
+
+policy_id: default
+policy_version: 1
+is_default: true
+
+allowed_capabilities: [economical-text]
+allowed_model_aliases: [economical-text-primary]
+allowed_quality_tiers: [standard]
+default_quality_tier: standard
+
+maximum_estimated_cost_usd: "0.005"
+maximum_output_tokens: 500
+
+routing_strategy: preferred_model
+preferred_model_alias: economical-text-primary
+latency_preference: balanced
+
+allow_client_overrides:
+  quality_tier: false
+  maximum_estimated_cost_usd: true
+  maximum_output_tokens: true
+  latency_preference: false

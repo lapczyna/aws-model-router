@@ -1,0 +1,16 @@
+{
+  "application_id": "support-assistant",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Summarize this incident report and suggest three follow-up actions for the on-call engineer."
+    }
+  ],
+  "requirements": {
+    "capability": "balanced-text",
+    "maximum_output_tokens": 400
+  },
+  "metadata": {
+    "use_case": "incident-summary"
+  }
+}
