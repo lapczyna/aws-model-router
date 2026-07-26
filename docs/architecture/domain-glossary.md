@@ -139,22 +139,32 @@ existing codes are never repurposed.
 
 ## Core interfaces (protocols)
 
-Defined in the domain/application layers and implemented by adapters (Phase 2–3):
+Defined in the domain/application layers and implemented by adapters (Phase 2–4):
 
 * **ModelProvider** — invokes a model given a `ProviderRequest`; returns a
-  `ProviderResponse` or a typed failure.
-* **ModelCatalogue** — resolves logical capabilities/aliases to `ModelDefinition`s.
+  `ProviderResponse` or a typed `ProviderError` (Phase 3; `BedrockModelProvider`).
+* **ModelCatalogue** — resolves logical capabilities/aliases to `ModelDefinition`s
+  (Phase 2; `LocalFileModelCatalogue`).
 * **RoutingPolicyRepository** — resolves the effective `RoutingPolicy` for an
-  `ApplicationIdentity`.
-* **RoutingStrategy** — selects/scores among `RouteCandidate`s.
+  application (Phase 2; `LocalFileRoutingPolicyRepository`).
+* **RoutingStrategy** — selects/scores among `RouteCandidate`s (Phase 2 preferred-model/
+  lowest-cost/quality-tier; Phase 4 adds weighted-experiment).
 * **CostEstimator** — computes `EstimatedCost` from `Usage`/token estimates and
-  `ModelPricing`.
-* **TokenEstimator** — estimates input/output token counts for a request.
-* **ModelHealthRepository** — supplies current `ModelHealth` for candidates.
-* **RoutingDecisionRepository** — persists/retrieves `RoutingDecision`/`AuditRecord`s.
-* **MetricsPublisher** — publishes low-cardinality operational metrics.
-* **Clock** — supplies the current UTC time (testable, injectable).
-* **IdentifierGenerator** — generates request/decision IDs (testable, injectable).
+  `ModelPricing` (Phase 2; `DefaultCostEstimator`).
+* **TokenEstimator** — estimates input/output token counts for a request (Phase 2;
+  `DefaultTokenEstimator`).
+* **IdempotencyStore** — deduplicates concurrent invocations and, if policy allows,
+  replays a completed result (Phase 4; `InMemoryIdempotencyStore`).
+* **RoutingDecisionRepository** — persists/retrieves `AuditRecord`s (Phase 4;
+  `InMemoryRoutingDecisionRepository`).
+* **Clock** — supplies the current UTC time (testable, injectable; Phase 2).
+* **IdentifierGenerator** — generates request/decision IDs (testable, injectable;
+  Phase 2).
+
+**ModelHealthRepository** and **MetricsPublisher** remain deferred to Phase 6, alongside
+their first real implementation and consumer — see `PROJECT_PLAN.md`'s "Open
+assumptions" section for why health filtering specifically is not yet wired in even
+though `ModelHealth`/`MODEL_UNHEALTHY` are modeled in the schema.
 
 ## Related documents
 

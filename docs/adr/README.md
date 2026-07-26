@@ -53,8 +53,11 @@ What else was evaluated, and why was it not chosen?
 | [ADR-008](0008-metadata-only-audit-records-by-default.md) | Metadata-only audit records by default | Accepted |
 | [ADR-009](0009-converse-api-as-normalized-bedrock-interface.md) | Converse API as the normalized Bedrock interface | Accepted |
 | [ADR-010](0010-configuration-storage-approach.md) | Configuration storage approach | Accepted |
+| [ADR-011](0011-fallback-eligibility.md) | Fallback eligibility | Accepted |
+| [ADR-012](0012-deterministic-experimentation.md) | Deterministic experimentation | Accepted |
+| [ADR-013](0013-idempotency-strategy.md) | Idempotency strategy | Accepted |
+| [ADR-014](0014-retry-and-cost-amplification-controls.md) | Retry and cost-amplification controls | Accepted |
 
-Future ADRs (fallback eligibility, deterministic experimentation, idempotency strategy,
-retry/cost amplification controls, API authorization model, cross-Region resilience,
-Responsible AI Gateway placement) are added in the phases where those decisions are made
-(Phases 4, 5, and 7 respectively — see `PROJECT_PLAN.md`).
+Future ADRs (API authorization model, cross-Region resilience, Responsible AI Gateway
+placement) are added in the phases where those decisions are made (Phases 5 and 7
+respectively — see `PROJECT_PLAN.md`).

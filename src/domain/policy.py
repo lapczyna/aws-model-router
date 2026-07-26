@@ -1,7 +1,21 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain.enums import LatencyPreference, QualityTier, RoutingStrategyType
+from domain.experiment import ExperimentPolicy
+from domain.fallback import FallbackPolicy
 from domain.money import Money
+
+
+class IdempotencyPolicy(BaseModel):
+    """Defined here, not in `domain.idempotency`, to avoid a circular import: that
+    module depends on `InferenceRequest`/`InferenceResult`, which transitively depend
+    on `RoutingPolicy` (via `domain.requirements`) — this type doesn't need to.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    allow_response_caching: bool = False
+    retention_seconds: int = Field(default=300, gt=0)
 
 
 class ClientOverridePermissions(BaseModel):
@@ -40,6 +54,9 @@ class RoutingPolicy(BaseModel):
     preferred_model_alias: str | None = None
     latency_preference: LatencyPreference = LatencyPreference.BALANCED
     allow_client_overrides: ClientOverridePermissions = ClientOverridePermissions()
+    fallback_policy: FallbackPolicy = FallbackPolicy()
+    experiment_policy: ExperimentPolicy | None = None
+    idempotency_policy: IdempotencyPolicy = IdempotencyPolicy()
 
     @model_validator(mode="after")
     def _validate_consistency(self) -> "RoutingPolicy":
@@ -59,5 +76,25 @@ class RoutingPolicy(BaseModel):
             and self.preferred_model_alias not in self.allowed_model_aliases
         ):
             raise ValueError("preferred_model_alias must be included in allowed_model_aliases")
+
+        if (
+            self.routing_strategy is RoutingStrategyType.EXPERIMENT
+            and self.experiment_policy is None
+        ):
+            raise ValueError("experiment_policy is required when routing_strategy is experiment")
+
+        if self.experiment_policy is not None:
+            for arm in self.experiment_policy.arms:
+                if arm.model_alias not in self.allowed_model_aliases:
+                    raise ValueError(
+                        f"experiment arm {arm.model_alias!r} must be included in "
+                        "allowed_model_aliases"
+                    )
+
+        for alias in self.fallback_policy.fallback_model_aliases:
+            if alias not in self.allowed_model_aliases:
+                raise ValueError(
+                    f"fallback model alias {alias!r} must be included in allowed_model_aliases"
+                )
 
         return self

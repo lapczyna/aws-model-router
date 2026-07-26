@@ -151,14 +151,24 @@ attempt records, final decision aggregation. New ADRs: fallback eligibility, det
 experimentation, idempotency strategy, retry/cost amplification controls.
 
 **DoD:**
-- [ ] Fallback never triggers for the excluded failure categories (validation, authz,
-      policy denial, cost rejection, unsupported capability, malformed config)
-- [ ] Retry/fallback attempts are bounded and tested at the boundary
-- [ ] Experiment cohort assignment is deterministic and boundary-tested
-- [ ] Idempotency covers repeated and concurrent duplicate requests, with expiry
-- [ ] 4 new ADRs added
-- [ ] `make ci` passes
-- [ ] Committed and pushed
+- [x] Fallback never triggers for the excluded failure categories — validation failure
+      never reaches `InvocationOrchestrator` (rejected by `InferenceRequest` validation),
+      policy denial/cost rejection/unsupported capability all manifest as
+      `decision.selected_model_alias is None` before any invocation is attempted,
+      malformed configuration propagates `ConfigurationError` unchanged, and a
+      `PERMANENT` invocation failure stops the chain immediately (ADR-011). Authorization
+      failure is not yet a domain concept (Phase 5).
+- [x] Retry/fallback attempts are bounded (`FallbackPolicy.maximum_attempts`) and tested
+      at the boundary (fallback-limit-enforced test)
+- [x] Experiment cohort assignment is deterministic and boundary-tested (5000-sample
+      allocation-proportion tests within tolerance, plus exact determinism assertions)
+- [x] Idempotency covers repeated requests (cache hit, no re-invocation), concurrent
+      duplicate requests (real `threading`-based test, not mocked), and expiry (both
+      completed-record TTL and stale-in-progress-reservation recovery)
+- [x] 4 new ADRs added (ADR-011..014)
+- [x] `make ci` passes: Ruff, Black, mypy --strict, pytest (217 tests — 69 new for
+      Phase 4 — 98% coverage on `src/`, 100% on all new Phase 4 modules) all clean
+- [x] Committed and pushed
 
 ### Phase 5 — AWS CDK infrastructure and serverless API
 CDK v2 Python stacks: API Gateway REST API, inference Lambda, health/ready endpoints,
@@ -261,12 +271,12 @@ traffic unvalidated.
 | Phase 1 — Foundation and architecture | Complete | `b059a41` (+ `ee55487` username fix, `9210c11` plan update) |
 | Phase 2 — Domain model and local routing engine | Complete | `771f98d` |
 | Phase 3 — Bedrock provider adapter | Complete | `929ce7a` |
+| Phase 4 — Fallback, experimentation, and idempotency | Deliverables complete, pending commit confirmation | _pending_ |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 4 | Fallback, experimentation, and idempotency |
 | 5 | AWS CDK infrastructure and serverless API |
 | 6 | Observability, auditability, and cost governance |
 | 7 | Security and resilience hardening |
@@ -295,14 +305,17 @@ incorrect:
   Lambda handler will translate to/from starting in Phase 5 — the two are not expected
   to share field names verbatim.
 * **Deferred protocols**: `ModelProvider`/`ProviderRequest`/`ProviderResponse` were added
-  in Phase 3, as planned. `ModelHealthRepository` and `RoutingDecisionRepository`/
-  `MetricsPublisher` remain deferred to Phases 4 and 4/6 respectively, to avoid
-  speculative, untested interfaces with no consumer.
+  in Phase 3; `IdempotencyStore` and `RoutingDecisionRepository` were added in Phase 4,
+  as planned. `ModelHealthRepository` and `MetricsPublisher` remain deferred to
+  Phase 6, alongside their first real implementation and consumer.
 * **Health filtering**: model health (`ModelHealth`/`MODEL_UNHEALTHY`) is modeled in the
-  catalogue schema (Phase 2) but not yet wired into candidate filtering — no
-  `ModelHealthRepository` exists yet to source a live signal from. Wiring it in is
-  Phase 4 scope, once there's a real health signal (provider invocation outcomes) to
-  filter on.
+  catalogue schema (Phase 2) but still not wired into candidate filtering — Phase 4's
+  explicit scope (fallback, experimentation, idempotency) did not include it, and no
+  `ModelHealthRepository` exists yet to source a live signal from. This is now correctly
+  deferred to Phase 6 (observability), where a real health signal — derived from
+  invocation outcomes recorded as `InvocationAttempt`s — first becomes available to
+  filter on. (An earlier note in this file said "Phase 4 scope"; corrected here now that
+  Phase 4 is complete and didn't include it.)
 * **Provider error taxonomy is category-based, not exception-subtype-based** (Phase 3):
   a single `domain.errors.ProviderError` carries a `category` attribute
   (`ProviderErrorCategory`: `THROTTLED`/`TRANSIENT`/`TIMEOUT`/`PERMANENT`) rather than a
@@ -323,3 +336,27 @@ incorrect:
   one level of indirection (a router alias pointing at another catalogue entry) and
   rejects a router alias pointing at another router alias as a configuration error,
   rather than following an arbitrary/recursive chain.
+* **`RoutingStrategy.select()` gained a `context: RoutingContext` parameter** (Phase 4):
+  `ExperimentStrategy` needs `application_id`/`conversation_id` to build a cohort subject
+  key, which the original Phase 2 signature (`eligible`, `policy`, `requirements`) had no
+  way to supply. A small dataclass (not more loose parameters) was added so a future
+  strategy needing more context doesn't require another signature change; the three
+  Phase 2 strategies accept and ignore it, consistent with how they already ignore
+  `requirements`.
+* **Fallback and experimentation are orthogonal, not alternative strategies**: fallback
+  (which model to retry with on failure) operates at the invocation layer
+  (`InvocationOrchestrator`) regardless of which `RoutingStrategy` chose the primary,
+  including `ExperimentStrategy` — an experiment-selected primary can still fail over to
+  an approved fallback like any other.
+* **`FallbackPolicy.maximum_attempts` serves both "maximum invocation attempts" and
+  "retry budget"** from the original Phase 4 scope — see ADR-014 for why one field
+  covers both, given `RetryPolicy` (Phase 3) already bounds retries within one model.
+* **`InMemoryIdempotencyStore` and `InMemoryRoutingDecisionRepository` are single-process
+  reference implementations** (thread-safe within one process, via one lock held for the
+  full check-then-act sequence) — not safe for multi-instance production deployment.
+  DynamoDB-backed implementations of the same protocols (conditional writes for the
+  idempotency store) are explicitly Phase 5 scope.
+* **Idempotency concurrency dedup is unconditional; response replay is policy-gated**
+  (ADR-013) — a concurrent duplicate is always blocked from double-invoking regardless
+  of policy, but only a policy with `allow_response_caching=True` retains a completed
+  result for a later, non-overlapping duplicate to replay.

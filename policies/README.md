@@ -13,9 +13,11 @@ no AWS dependency.
 * [`applications/`](applications/) — one file per application, named
   `<applicationId>.yaml` (or `.yml`/`.json`), each a `RoutingPolicy`. Loaded by
   `adapters.config.local_policy_repository.LocalFileRoutingPolicyRepository`.
-
-Fallback chains and experiment configuration are added to this schema in Phase 4, once
-`FallbackPolicy` and `ExperimentPolicy` are implemented.
+  - `support-assistant.yaml` — `lowest_cost` strategy, plus a `fallback_policy`
+    configuring `balanced-text-secondary` as a backup for `balanced-text-primary`
+    (ADR-011).
+  - `experimental-app.yaml` — `experiment` strategy, weighted 70/30 between
+    `balanced-text-primary` and `balanced-text-secondary` (ADR-012).
 
 Pricing values in these files must be quoted strings (e.g. `"0.00025"`), not bare
 numbers — see `src/domain/money.py` for why (unquoted YAML numbers parse as a lossy

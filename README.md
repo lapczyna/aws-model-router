@@ -11,14 +11,13 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 3 — Bedrock provider adapter.** The routing engine (Phase 2) runs
-> entirely locally via `scripts/evaluate_route.py` (see [below](#try-it-locally)).
-> `BedrockModelProvider` now implements real Bedrock Converse API invocation behind the
-> `ModelProvider` interface, tested exclusively with fakes and `botocore.stub.Stubber` —
-> no live AWS call happens in the test suite or CI. An explicitly opt-in, cost-warned
-> manual script (`scripts/bedrock_live_smoke_test.py`) exists for a real invocation. No
-> AWS infrastructure is deployed yet. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the
-> full phased roadmap.
+> **Status: Phase 4 — Fallback, experimentation, and idempotency.** The routing engine
+> (Phase 2) and Bedrock invocation (Phase 3) are now composed by an
+> `InvocationOrchestrator` that adds policy-controlled fallback across models, weighted
+> deterministic experiment routing, and idempotency (concurrency-safe, with policy-gated
+> response replay). No AWS infrastructure is deployed yet — everything still runs and is
+> tested locally with zero AWS credentials. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for
+> the full phased roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -111,6 +110,33 @@ call. A real invocation is available only via the explicitly opt-in
 [`scripts/bedrock_live_smoke_test.py`](scripts/bedrock_live_smoke_test.py) (env-flag +
 `--confirm-cost` gated, never run by CI).
 
+## Fallback, experimentation, and idempotency
+
+`application.invocation_orchestrator.InvocationOrchestrator` (under
+[`src/application/`](src/application/)) composes route evaluation and Bedrock
+invocation into the full request flow:
+
+* **Fallback** (ADR-011) is policy-controlled: `RoutingPolicy.fallback_policy` configures
+  an ordered chain of alternate models and a maximum chain length. Fallback is attempted
+  only for throttled/transient/timeout invocation failures — never for policy denial,
+  cost rejection, unsupported capability, or malformed configuration, all of which are
+  resolved (or raised) before any invocation is attempted.
+* **Weighted experimentation** (ADR-012) adds `ExperimentStrategy`, a fourth
+  `RoutingStrategy` alongside Phase 2's preferred-model/lowest-cost/quality-tier: cohort
+  assignment is a deterministic SHA-256 hash of a stable subject key, proportional to
+  configured arm weights — no randomness, fully reproducible.
+* **Idempotency** (ADR-013) dedupes concurrent duplicate requests unconditionally (a
+  real `threading`-based test proves this — not mocked), while replaying a *completed*
+  result to a later, non-overlapping duplicate is a separate, explicit
+  `allow_response_caching` policy opt-in (off by default, per ADR-008).
+* **Retry/cost-amplification controls** (ADR-014): the worst-case cost multiplier for
+  one logical request is a fixed, computable
+  `FallbackPolicy.maximum_attempts × RetryPolicy.max_attempts` — not an open-ended loop.
+
+Reference implementations (`adapters.memory`) provide thread-safe, single-process
+`IdempotencyStore` and `RoutingDecisionRepository` for local development and tests;
+DynamoDB-backed, multi-instance-safe implementations are Phase 5 scope.
+
 ## Try it locally
 
 Evaluate a routing decision without any AWS credentials, using the sample policies and
@@ -143,6 +169,10 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [008](docs/adr/0008-metadata-only-audit-records-by-default.md) | Metadata-only audit records by default |
 | [009](docs/adr/0009-converse-api-as-normalized-bedrock-interface.md) | Converse API as the normalized Bedrock interface |
 | [010](docs/adr/0010-configuration-storage-approach.md) | Configuration storage approach |
+| [011](docs/adr/0011-fallback-eligibility.md) | Fallback eligibility |
+| [012](docs/adr/0012-deterministic-experimentation.md) | Deterministic experimentation |
+| [013](docs/adr/0013-idempotency-strategy.md) | Idempotency strategy |
+| [014](docs/adr/0014-retry-and-cost-amplification-controls.md) | Retry and cost-amplification controls |
 
 ## Repository structure
 
@@ -251,8 +281,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 |---|---|
 | 1 | Foundation and architecture |
 | 2 | Domain model and local routing engine (no AWS) |
-| 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) *(this phase)* |
-| 4 | Fallback, experimentation, and idempotency |
+| 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) |
+| 4 | Fallback, experimentation, and idempotency *(this phase)* |
 | 5 | AWS CDK infrastructure and serverless API |
 | 6 | Observability, auditability, and cost governance |
 | 7 | Security and resilience hardening |

@@ -5,8 +5,9 @@
 # values MUST be quoted strings (see src/domain/money.py) so they parse as exact
 # Decimal, never as a lossy binary float.
 #
-# model_alias resolution.value holds a real Bedrock model ID purely as illustrative,
-# realistic configuration data — Phase 2 never invokes it. Invocation begins Phase 3.
+# model_alias resolution.value holds a real Bedrock model ID as illustrative, realistic
+# configuration data. `balanced-text-secondary` exists specifically to demonstrate a
+# realistic fallback/experiment target across model families for the same capability.
 
 catalogue_version: 1
 
@@ -53,6 +54,33 @@ models:
       currency: USD
       input_price_per_1k_tokens: "0.003"
       output_price_per_1k_tokens: "0.015"
+      pricing_version: 1
+    health:
+      status: healthy
+
+  - model_alias: balanced-text-secondary
+    # A deliberately pricier backup, not a cheaper alternative — so the existing
+    # lowest-cost demo (scripts/examples/support_assistant_balanced.json) still
+    # selects balanced-text-primary, and this model's role is purely as a fallback/
+    # experiment target, not a competitor on cost.
+    provider: bedrock
+    region: us-east-1
+    resolution:
+      type: direct_model_id
+      value: meta.llama3-1-70b-instruct-v1:0
+    capabilities:
+      capability_tags: [balanced-text]
+      quality_tier: standard
+      max_input_tokens: 128000
+      max_output_tokens: 4096
+      supports_tool_use: false
+      supports_structured_output: false
+      supports_streaming: true
+      supported_modalities: [text]
+    pricing:
+      currency: USD
+      input_price_per_1k_tokens: "0.008"
+      output_price_per_1k_tokens: "0.024"
       pricing_version: 1
     health:
       status: healthy

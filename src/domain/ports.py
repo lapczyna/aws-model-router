@@ -5,9 +5,8 @@ from Phase 5 — ADR-010). The domain and application layers only ever depend on
 protocols defined here, never on a concrete adapter (ADR-002).
 
 Only the protocols with a real caller and implementation are defined here.
-`ModelHealthRepository`, `RoutingDecisionRepository` (Phase 4), and `MetricsPublisher`
-(Phase 6) are introduced alongside their first real implementation and consumer, not
-speculatively ahead of them.
+`ModelHealthRepository` and `MetricsPublisher` (Phase 6) are introduced alongside their
+first real implementation and consumer, not speculatively ahead of them.
 """
 
 from collections.abc import Sequence
@@ -15,6 +14,8 @@ from datetime import datetime
 from typing import Protocol
 
 from domain.catalogue import ModelDefinition, ModelPricing
+from domain.idempotency import IdempotencyReservation
+from domain.invocation import AuditRecord, InferenceResult
 from domain.messages import Message
 from domain.policy import RoutingPolicy
 from domain.provider import ProviderRequest, ProviderResponse
@@ -77,3 +78,36 @@ class ModelProvider(Protocol):
     """
 
     def invoke(self, request: ProviderRequest) -> ProviderResponse: ...
+
+
+class IdempotencyStore(Protocol):
+    """Deduplicates concurrent invocations and, if policy allows, replays a completed
+    result for a repeated idempotency key (ADR-013).
+    """
+
+    def reserve(
+        self, application_id: str, idempotency_key: str, request_hash: str
+    ) -> IdempotencyReservation: ...
+
+    def complete(
+        self,
+        application_id: str,
+        idempotency_key: str,
+        request_hash: str,
+        result: InferenceResult,
+        *,
+        cache_result: bool,
+        retention_seconds: int,
+    ) -> None: ...
+
+    def release(self, application_id: str, idempotency_key: str) -> None: ...
+
+
+class RoutingDecisionRepository(Protocol):
+    """Persists and retrieves sanitized `AuditRecord`s (ADR-008) — what
+    `GET /v1/decisions/{decisionId}` will read from once the HTTP API exists (Phase 5).
+    """
+
+    def save(self, audit_record: AuditRecord) -> None: ...
+
+    def get(self, decision_id: str) -> AuditRecord | None: ...

@@ -65,3 +65,74 @@ def test_rejects_unknown_fields() -> None:
     kwargs["unexpected_field"] = "nope"
     with pytest.raises(ValidationError):
         RoutingPolicy.model_validate(kwargs)
+
+
+def test_experiment_policy_required_for_experiment_strategy() -> None:
+    kwargs = _base_policy_kwargs()
+    kwargs["routing_strategy"] = "experiment"
+    kwargs["preferred_model_alias"] = None
+    with pytest.raises(ValidationError, match="experiment_policy is required"):
+        RoutingPolicy.model_validate(kwargs)
+
+
+def test_experiment_arm_must_be_in_allowed_model_aliases() -> None:
+    kwargs = _base_policy_kwargs()
+    kwargs["routing_strategy"] = "experiment"
+    kwargs["preferred_model_alias"] = None
+    kwargs["experiment_policy"] = {
+        "experiment_id": "exp-1",
+        "arms": [
+            {"model_alias": "balanced-text-primary", "weight": 50},
+            {"model_alias": "not-allowed-model", "weight": 50},
+        ],
+    }
+    with pytest.raises(ValidationError, match="must be included in allowed_model_aliases"):
+        RoutingPolicy.model_validate(kwargs)
+
+
+def test_valid_experiment_policy_parses() -> None:
+    kwargs = _base_policy_kwargs()
+    kwargs["allowed_model_aliases"] = ["balanced-text-primary", "balanced-text-secondary"]
+    kwargs["routing_strategy"] = "experiment"
+    kwargs["preferred_model_alias"] = None
+    kwargs["experiment_policy"] = {
+        "experiment_id": "exp-1",
+        "arms": [
+            {"model_alias": "balanced-text-primary", "weight": 70},
+            {"model_alias": "balanced-text-secondary", "weight": 30},
+        ],
+    }
+    policy = RoutingPolicy.model_validate(kwargs)
+    assert policy.experiment_policy is not None
+    assert policy.routing_strategy is RoutingStrategyType.EXPERIMENT
+
+
+def test_fallback_model_alias_must_be_in_allowed_model_aliases() -> None:
+    kwargs = _base_policy_kwargs()
+    kwargs["fallback_policy"] = {
+        "fallback_model_aliases": ["not-allowed-model"],
+        "maximum_attempts": 2,
+    }
+    with pytest.raises(ValidationError, match="must be included in allowed_model_aliases"):
+        RoutingPolicy.model_validate(kwargs)
+
+
+def test_valid_fallback_policy_parses() -> None:
+    kwargs = _base_policy_kwargs()
+    kwargs["allowed_model_aliases"] = ["balanced-text-primary", "balanced-text-secondary"]
+    kwargs["fallback_policy"] = {
+        "fallback_model_aliases": ["balanced-text-secondary"],
+        "maximum_attempts": 2,
+    }
+    policy = RoutingPolicy.model_validate(kwargs)
+    assert policy.fallback_policy.maximum_attempts == 2
+    assert policy.fallback_policy.fallback_model_aliases == ("balanced-text-secondary",)
+
+
+def test_default_fallback_and_idempotency_policies() -> None:
+    policy = RoutingPolicy.model_validate(_base_policy_kwargs())
+    assert policy.fallback_policy.maximum_attempts == 1
+    assert policy.fallback_policy.fallback_model_aliases == ()
+    assert policy.experiment_policy is None
+    assert policy.idempotency_policy.allow_response_caching is False
+    assert policy.idempotency_policy.retention_seconds == 300

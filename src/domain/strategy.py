@@ -2,12 +2,14 @@
 
 Each strategy selects among the *already-eligible* candidates produced by
 `domain.filtering.build_route_candidates` — none of them re-checks allowlist, token, or
-cost eligibility. Given the same eligible candidate set, a strategy always returns the
-same selection; there is no randomness or hidden state.
+cost eligibility. Given the same eligible candidate set and `RoutingContext`, a strategy
+always returns the same selection; there is no randomness or hidden state.
 
-Only the three strategies Phase 2 implements are defined here: preferred-model,
-lowest-cost, and quality-tier. Latency-preference, weighted-experiment, and fallback
-routing are added in later phases (see `PROJECT_PLAN.md`).
+Four strategies are defined: preferred-model, lowest-cost, and quality-tier (Phase 2),
+and weighted-experiment (Phase 4, ADR-012). Latency-preference and fallback routing are
+handled elsewhere — fallback is orthogonal to primary strategy selection entirely (it
+operates at the invocation layer, see `application.invocation_orchestrator`), not
+another `RoutingStrategy` choice.
 """
 
 from collections.abc import Sequence
@@ -16,9 +18,22 @@ from typing import Protocol
 
 from domain.candidates import RouteCandidate
 from domain.enums import RoutingStrategyType
+from domain.experiment import assign_experiment_cohort, build_experiment_subject_key
 from domain.policy import RoutingPolicy
 from domain.reason_codes import RoutingReasonCode
 from domain.requirements import EffectiveRoutingRequirements
+
+
+@dataclass(frozen=True)
+class RoutingContext:
+    """Per-request context a strategy may need beyond the candidate set and policy.
+
+    A dataclass (not extra loose parameters) so a future strategy needing more context
+    doesn't require another `RoutingStrategy.select()` signature change.
+    """
+
+    application_id: str
+    conversation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +48,7 @@ class RoutingStrategy(Protocol):
         eligible: Sequence[RouteCandidate],
         policy: RoutingPolicy,
         requirements: EffectiveRoutingRequirements,
+        context: RoutingContext,
     ) -> RouteSelection: ...
 
 
@@ -49,6 +65,7 @@ class PreferredModelStrategy:
         eligible: Sequence[RouteCandidate],
         policy: RoutingPolicy,
         requirements: EffectiveRoutingRequirements,
+        context: RoutingContext,
     ) -> RouteSelection:
         for candidate in eligible:
             if candidate.model_alias == policy.preferred_model_alias:
@@ -67,6 +84,7 @@ class LowestCostStrategy:
         eligible: Sequence[RouteCandidate],
         policy: RoutingPolicy,
         requirements: EffectiveRoutingRequirements,
+        context: RoutingContext,
     ) -> RouteSelection:
         if not eligible:
             return RouteSelection(selected=None)
@@ -89,6 +107,7 @@ class QualityTierStrategy:
         eligible: Sequence[RouteCandidate],
         policy: RoutingPolicy,
         requirements: EffectiveRoutingRequirements,
+        context: RoutingContext,
     ) -> RouteSelection:
         if not eligible:
             return RouteSelection(selected=None)
@@ -96,10 +115,46 @@ class QualityTierStrategy:
         return RouteSelection(selected=winner)
 
 
+class ExperimentStrategy:
+    """Selects the candidate deterministically assigned by the policy's experiment.
+
+    The assigned arm is looked up in `eligible` by alias; if that specific arm isn't
+    eligible (e.g. it failed a cost/token check for this request), this strategy does
+    *not* silently reassign to a different arm — that would contaminate the experiment's
+    statistical validity. It returns no selection, same as any other strategy exhausting
+    its eligible set.
+    """
+
+    def select(
+        self,
+        eligible: Sequence[RouteCandidate],
+        policy: RoutingPolicy,
+        requirements: EffectiveRoutingRequirements,
+        context: RoutingContext,
+    ) -> RouteSelection:
+        experiment = policy.experiment_policy
+        if experiment is None:
+            return RouteSelection(selected=None)
+
+        subject_key = build_experiment_subject_key(
+            experiment, context.application_id, context.conversation_id
+        )
+        assigned_alias = assign_experiment_cohort(subject_key, experiment)
+
+        for candidate in eligible:
+            if candidate.model_alias == assigned_alias:
+                return RouteSelection(
+                    selected=candidate,
+                    additional_reason_codes=(RoutingReasonCode.EXPERIMENT_ROUTE_SELECTED,),
+                )
+        return RouteSelection(selected=None)
+
+
 _STRATEGIES: dict[RoutingStrategyType, RoutingStrategy] = {
     RoutingStrategyType.PREFERRED_MODEL: PreferredModelStrategy(),
     RoutingStrategyType.LOWEST_COST: LowestCostStrategy(),
     RoutingStrategyType.QUALITY_TIER: QualityTierStrategy(),
+    RoutingStrategyType.EXPERIMENT: ExperimentStrategy(),
 }
 
 

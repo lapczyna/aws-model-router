@@ -13,7 +13,9 @@ from decimal import Decimal
 from domain.catalogue import ModelCapabilities, ModelDefinition, ModelPricing, ModelResolution
 from domain.enums import ModelResolutionType, ProviderName, QualityTier
 from domain.errors import RoutingPolicyNotFoundError
-from domain.policy import RoutingPolicy
+from domain.experiment import ExperimentPolicy
+from domain.fallback import FallbackPolicy
+from domain.policy import IdempotencyPolicy, RoutingPolicy
 
 
 class FixedClock:
@@ -130,6 +132,9 @@ def make_policy(
     routing_strategy: str = "preferred_model",
     preferred_model_alias: str | None = _UNSET,
     allow_client_overrides: dict[str, bool] | None = None,
+    fallback_policy: FallbackPolicy | None = None,
+    experiment_policy: ExperimentPolicy | None = None,
+    idempotency_policy: IdempotencyPolicy | None = None,
 ) -> RoutingPolicy:
     """Build a `RoutingPolicy` with sensible defaults, overridable per test.
 
@@ -156,5 +161,8 @@ def make_policy(
             "routing_strategy": routing_strategy,
             "preferred_model_alias": preferred_model_alias,
             "allow_client_overrides": allow_client_overrides or {},
+            "fallback_policy": fallback_policy or FallbackPolicy(),
+            "experiment_policy": experiment_policy,
+            "idempotency_policy": idempotency_policy or IdempotencyPolicy(),
         }
     )

@@ -29,6 +29,7 @@ class RoutingStrategyType(StrEnum):
     PREFERRED_MODEL = "preferred_model"
     LOWEST_COST = "lowest_cost"
     QUALITY_TIER = "quality_tier"
+    EXPERIMENT = "experiment"
 
 
 class ProviderName(StrEnum):

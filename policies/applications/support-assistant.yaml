@@ -5,7 +5,7 @@ policy_id: support-assistant-default
 policy_version: 3
 
 allowed_capabilities: [economical-text, balanced-text]
-allowed_model_aliases: [economical-text-primary, balanced-text-primary]
+allowed_model_aliases: [economical-text-primary, balanced-text-primary, balanced-text-secondary]
 allowed_quality_tiers: [standard, premium]
 default_quality_tier: standard
 
@@ -14,6 +14,15 @@ maximum_output_tokens: 1000
 
 routing_strategy: lowest_cost
 latency_preference: balanced
+
+# If the lowest-cost pick (balanced-text-primary, for balanced-text requests) fails
+# with an eligible (throttled/transient/timeout) invocation error, fall back once to
+# balanced-text-secondary rather than failing the request outright (ADR-011). This
+# never applies to economical-text requests — balanced-text-secondary only shares the
+# balanced-text capability tag, so it is never an eligible candidate for those.
+fallback_policy:
+  fallback_model_aliases: [balanced-text-secondary]
+  maximum_attempts: 2
 
 allow_client_overrides:
   quality_tier: true

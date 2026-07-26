@@ -34,3 +34,19 @@ class ProviderError(DomainError):
     def __init__(self, message: str, *, category: ProviderErrorCategory) -> None:
         super().__init__(message)
         self.category = category
+
+
+class IdempotencyConflictError(DomainError):
+    """Raised when an idempotency key is reused with a different, non-matching request.
+
+    This is deliberately never treated as "fallback eligible" or silently resolved —
+    reusing a key for different content is either a client bug or a replay attempt, and
+    must surface as a clear error rather than serving a mismatched cached result.
+    """
+
+
+class IdempotencyInProgressError(DomainError):
+    """Raised when a concurrent, still-in-flight request holds the same idempotency key.
+
+    Prevents two simultaneous identical requests from both invoking a model (ADR-013).
+    """

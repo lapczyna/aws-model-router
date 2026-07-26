@@ -1,0 +1,16 @@
+{
+  "application_id": "experimental-app",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Draft a short status update for the incident channel."
+    }
+  ],
+  "requirements": {
+    "capability": "balanced-text"
+  },
+  "conversation_id": "conv-demo-001",
+  "metadata": {
+    "use_case": "status-update"
+  }
+}

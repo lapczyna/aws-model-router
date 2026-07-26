@@ -21,7 +21,7 @@ from domain.ports import (
 from domain.reason_codes import RoutingReasonCode, sort_reason_codes
 from domain.requests import InferenceRequest
 from domain.requirements import resolve_effective_requirements
-from domain.strategy import RouteSelection, get_strategy
+from domain.strategy import RouteSelection, RoutingContext, get_strategy
 
 
 class RouteEvaluationService:
@@ -85,7 +85,10 @@ class RouteEvaluationService:
         )
         eligible = [candidate for candidate in candidates if candidate.eligible]
         strategy = get_strategy(policy.routing_strategy)
-        selection = strategy.select(eligible, policy, effective_requirements)
+        context = RoutingContext(
+            application_id=request.application_id, conversation_id=request.conversation_id
+        )
+        selection = strategy.select(eligible, policy, effective_requirements, context)
 
         reason_codes: tuple[RoutingReasonCode, ...]
         if selection.selected is None:

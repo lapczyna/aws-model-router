@@ -1,0 +1,30 @@
+# Sample application demonstrating weighted, deterministic experiment routing
+# (ADR-012). Cohort assignment is a pure hash of experiment_id + application_id +
+# conversation_id — the same conversation always lands in the same arm.
+
+policy_id: experimental-app-default
+policy_version: 1
+
+allowed_capabilities: [balanced-text]
+allowed_model_aliases: [balanced-text-primary, balanced-text-secondary]
+allowed_quality_tiers: [standard]
+default_quality_tier: standard
+
+maximum_estimated_cost_usd: "0.02"
+maximum_output_tokens: 500
+
+routing_strategy: experiment
+experiment_policy:
+  experiment_id: balanced-text-model-comparison-2026h1
+  arms:
+    - model_alias: balanced-text-primary
+      weight: 70
+    - model_alias: balanced-text-secondary
+      weight: 30
+  subject_key_source: application_and_conversation
+
+allow_client_overrides:
+  quality_tier: false
+  maximum_estimated_cost_usd: true
+  maximum_output_tokens: true
+  latency_preference: false
