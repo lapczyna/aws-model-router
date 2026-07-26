@@ -46,3 +46,32 @@ class ModelResolutionType(StrEnum):
     CROSS_REGION_INFERENCE_PROFILE = "cross_region_inference_profile"
     APPLICATION_INFERENCE_PROFILE = "application_inference_profile"
     ROUTER_ALIAS = "router_alias"
+
+
+class StopReason(StrEnum):
+    """Normalized across providers (ADR-009). `OTHER` absorbs any value a provider adds
+    in the future so response parsing never fails on an unrecognized-but-valid reason.
+    """
+
+    END_TURN = "end_turn"
+    MAX_TOKENS = "max_tokens"
+    STOP_SEQUENCE = "stop_sequence"
+    TOOL_USE = "tool_use"
+    CONTENT_FILTERED = "content_filtered"
+    GUARDRAIL_INTERVENED = "guardrail_intervened"
+    OTHER = "other"
+
+
+class ProviderErrorCategory(StrEnum):
+    """The provider error taxonomy invocation callers reason about.
+
+    `THROTTLED`, `TRANSIENT`, and `TIMEOUT` are eligible for bounded retry (and, from
+    Phase 4, fallback); `PERMANENT` is not — retrying a permanent error (bad alias,
+    unsupported capability, malformed response, request validation failure) would just
+    reproduce the same failure while adding latency and cost.
+    """
+
+    THROTTLED = "throttled"
+    TRANSIENT = "transient"
+    TIMEOUT = "timeout"
+    PERMANENT = "permanent"

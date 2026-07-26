@@ -4,10 +4,10 @@ Adapters implement these against a concrete backend (local files today; DynamoDB
 from Phase 5 — ADR-010). The domain and application layers only ever depend on the
 protocols defined here, never on a concrete adapter (ADR-002).
 
-Only the protocols Phase 2 actually has a caller and implementation for are defined
-here. `ModelProvider` (Phase 3), `ModelHealthRepository`, `RoutingDecisionRepository`
-(Phase 4), and `MetricsPublisher` (Phase 6) are introduced alongside their first real
-implementation and consumer, not speculatively ahead of them.
+Only the protocols with a real caller and implementation are defined here.
+`ModelHealthRepository`, `RoutingDecisionRepository` (Phase 4), and `MetricsPublisher`
+(Phase 6) are introduced alongside their first real implementation and consumer, not
+speculatively ahead of them.
 """
 
 from collections.abc import Sequence
@@ -17,6 +17,7 @@ from typing import Protocol
 from domain.catalogue import ModelDefinition, ModelPricing
 from domain.messages import Message
 from domain.policy import RoutingPolicy
+from domain.provider import ProviderRequest, ProviderResponse
 from domain.usage import EstimatedCost, Usage
 
 
@@ -64,3 +65,15 @@ class CostEstimator(Protocol):
     """Computes an `EstimatedCost` from `Usage` and a model's versioned pricing."""
 
     def estimate(self, usage: Usage, pricing: ModelPricing) -> EstimatedCost: ...
+
+
+class ModelProvider(Protocol):
+    """Invokes a specific model. `BedrockModelProvider` (Phase 3) is the first
+    implementation; a second provider is added as a new adapter implementing this same
+    protocol, without changing the domain or application layers (ADR-002).
+
+    Raises `domain.errors.ProviderError` for every failure category — callers never
+    need to catch provider-specific exception types.
+    """
+
+    def invoke(self, request: ProviderRequest) -> ProviderResponse: ...

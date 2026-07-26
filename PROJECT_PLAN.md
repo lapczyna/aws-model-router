@@ -123,12 +123,25 @@ calls in CI. Opt-in manual smoke-test script (env-flag gated, cost-warned, exclu
 CI, no prompt-content logging).
 
 **DoD:**
-- [ ] `BedrockModelProvider` implements `ModelProvider` fully via Converse API
-- [ ] All listed failure modes covered by tests using fakes/Stubber
-- [ ] No client path can reach an arbitrary model ID
-- [ ] Manual smoke-test script exists, is opt-in, and is excluded from CI
-- [ ] `make ci` passes with no live AWS calls
-- [ ] Committed and pushed
+- [x] `BedrockModelProvider` implements `ModelProvider` fully via Converse API —
+      request/response mapping, stop-reason mapping, alias resolution (including a
+      single-hop `ROUTER_ALIAS` indirection), pre-invocation capability validation
+- [x] All listed failure modes covered by tests using fakes/Stubber: successful
+      invocation, malformed response, throttling, transient failure, permanent failure,
+      timeout, invalid model alias, missing usage information, unsupported parameter
+      (capability) mapping, sanitized exceptions
+- [x] No client path can reach an arbitrary model ID — `ProviderRequest.model_alias` is
+      always resolved through the `ModelCatalogue`; an unknown alias is a `PERMANENT`
+      `ProviderError` raised before any Bedrock call is attempted
+- [x] Manual smoke-test script (`scripts/bedrock_live_smoke_test.py`) exists, requires
+      an env flag + `--confirm-cost` + an explicit `--model-alias` (both gates verified
+      to refuse execution without live AWS calls), and is excluded from CI (not a
+      pytest module)
+- [x] `make ci` passes with no live AWS calls: Ruff, Black, mypy --strict, pytest
+      (148 tests — 65 new for Phase 3 — 98% coverage on `src/`, 100% on the new
+      `adapters/bedrock/` package) all clean; contract tests use `botocore.stub.Stubber`
+      against a real (but network-isolated) boto3 client
+- [x] Committed and pushed
 
 ### Phase 4 — Fallback, experimentation, and idempotency
 Explicit fallback policies + eligibility rules, max attempts/retry budget, deterministic
@@ -247,12 +260,12 @@ traffic unvalidated.
 |---|---|---|
 | Phase 1 — Foundation and architecture | Complete | `b059a41` (+ `ee55487` username fix, `9210c11` plan update) |
 | Phase 2 — Domain model and local routing engine | Complete | `771f98d` |
+| Phase 3 — Bedrock provider adapter | Deliverables complete, pending commit confirmation | _pending_ |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 3 | Bedrock provider adapter |
 | 4 | Fallback, experimentation, and idempotency |
 | 5 | AWS CDK infrastructure and serverless API |
 | 6 | Observability, auditability, and cost governance |
@@ -281,14 +294,32 @@ incorrect:
   (`docs/architecture/api-contracts.md`) is a separate, external representation that a
   Lambda handler will translate to/from starting in Phase 5 — the two are not expected
   to share field names verbatim.
-* **Deferred protocols** (Phase 2): `ModelProvider`/`ProviderRequest`/`ProviderResponse`,
-  `ModelHealthRepository`, and `RoutingDecisionRepository`/`MetricsPublisher` were *not*
-  added to `src/domain/ports.py` in Phase 2 even though `docs/architecture/overview.md`
-  lists them as eventual core interfaces — they're introduced alongside their first real
-  implementation and caller in Phases 3, 4, and 4/6 respectively, to avoid speculative,
-  untested interfaces with no consumer.
+* **Deferred protocols**: `ModelProvider`/`ProviderRequest`/`ProviderResponse` were added
+  in Phase 3, as planned. `ModelHealthRepository` and `RoutingDecisionRepository`/
+  `MetricsPublisher` remain deferred to Phases 4 and 4/6 respectively, to avoid
+  speculative, untested interfaces with no consumer.
 * **Health filtering**: model health (`ModelHealth`/`MODEL_UNHEALTHY`) is modeled in the
   catalogue schema (Phase 2) but not yet wired into candidate filtering — no
   `ModelHealthRepository` exists yet to source a live signal from. Wiring it in is
-  Phase 3/4 scope, once there's a real health signal (provider invocation outcomes) to
+  Phase 4 scope, once there's a real health signal (provider invocation outcomes) to
   filter on.
+* **Provider error taxonomy is category-based, not exception-subtype-based** (Phase 3):
+  a single `domain.errors.ProviderError` carries a `category` attribute
+  (`ProviderErrorCategory`: `THROTTLED`/`TRANSIENT`/`TIMEOUT`/`PERMANENT`) rather than a
+  deep exception hierarchy. This lets Phase 4's fallback orchestrator make one decision
+  (`category in {THROTTLED, TRANSIENT, TIMEOUT}` ⇒ retryable/fallback-eligible) without
+  needing to catch multiple exception types.
+* **Retry/backoff is full-jitter exponential**, with `attempt`, the `RetryPolicy`, and
+  the jitter fraction all injectable — `BedrockModelProvider` never calls `random`/`time`
+  directly in a way tests can't control, keeping retry tests deterministic and fast
+  (no real sleeping).
+* **Tool-use/structured-output invocation mechanics are out of scope through Phase 3**:
+  `ProviderRequest.requires_tool_use`/`requires_structured_output` are used only as a
+  pre-invocation capability check against `ModelCapabilities` (raising a `PERMANENT`
+  `ProviderError` if unsupported) — actual Converse `toolConfig` request construction and
+  tool-call response parsing is explicitly Phase 10 scope ("tool-use capability
+  routing"), per the original project scope.
+* **`ROUTER_ALIAS` resolution is a single, bounded hop**: `BedrockModelProvider` resolves
+  one level of indirection (a router alias pointing at another catalogue entry) and
+  rejects a router alias pointing at another router alias as a configuration error,
+  rather than following an arbitrary/recursive chain.

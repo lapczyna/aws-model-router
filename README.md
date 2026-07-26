@@ -11,11 +11,13 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 2 — Domain model and local routing engine.** The routing engine —
-> domain models, policy/catalogue schemas, candidate filtering, and three deterministic
-> routing strategies — runs entirely locally, with zero AWS credentials, via
-> `scripts/evaluate_route.py` (see [below](#try-it-locally)). No AWS infrastructure is
-> deployed and no model is invoked yet. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the
+> **Status: Phase 3 — Bedrock provider adapter.** The routing engine (Phase 2) runs
+> entirely locally via `scripts/evaluate_route.py` (see [below](#try-it-locally)).
+> `BedrockModelProvider` now implements real Bedrock Converse API invocation behind the
+> `ModelProvider` interface, tested exclusively with fakes and `botocore.stub.Stubber` —
+> no live AWS call happens in the test suite or CI. An explicitly opt-in, cost-warned
+> manual script (`scripts/bedrock_live_smoke_test.py`) exists for a real invocation. No
+> AWS infrastructure is deployed yet. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the
 > full phased roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
@@ -94,6 +96,20 @@ Typed domain concepts (`InferenceRequest`, `RoutingPolicy`, `ModelDefinition`,
 defined in [`docs/architecture/domain-glossary.md`](docs/architecture/domain-glossary.md)
 and implemented as immutable, `mypy --strict`-typed Pydantic models under
 [`src/domain/`](src/domain/), with zero AWS SDK imports (ADR-002).
+
+## Bedrock provider adapter
+
+`BedrockModelProvider` (under [`src/adapters/bedrock/`](src/adapters/bedrock/))
+implements `domain.ports.ModelProvider` against the Bedrock Converse API (ADR-009): it
+resolves a logical model alias through the catalogue (never a client-supplied model
+ID — ADR-006), validates the request against that model's declared capabilities,
+invokes it, and classifies any failure into a stable
+`throttled | transient | timeout | permanent` taxonomy with bounded, full-jitter
+exponential-backoff retries. Every test exercises this against a hand-rolled fake client
+or a real boto3 client wrapped in `botocore.stub.Stubber` — no test makes a live AWS
+call. A real invocation is available only via the explicitly opt-in
+[`scripts/bedrock_live_smoke_test.py`](scripts/bedrock_live_smoke_test.py) (env-flag +
+`--confirm-cost` gated, never run by CI).
 
 ## Try it locally
 
@@ -234,8 +250,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 | Phase | Focus |
 |---|---|
 | 1 | Foundation and architecture |
-| 2 | Domain model and local routing engine (no AWS) *(this phase)* |
-| 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) |
+| 2 | Domain model and local routing engine (no AWS) |
+| 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) *(this phase)* |
 | 4 | Fallback, experimentation, and idempotency |
 | 5 | AWS CDK infrastructure and serverless API |
 | 6 | Observability, auditability, and cost governance |
