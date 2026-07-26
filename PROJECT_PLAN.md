@@ -271,7 +271,7 @@ traffic unvalidated.
 | Phase 1 — Foundation and architecture | Complete | `b059a41` (+ `ee55487` username fix, `9210c11` plan update) |
 | Phase 2 — Domain model and local routing engine | Complete | `771f98d` |
 | Phase 3 — Bedrock provider adapter | Complete | `929ce7a` |
-| Phase 4 — Fallback, experimentation, and idempotency | Deliverables complete, pending commit confirmation | _pending_ |
+| Phase 4 — Fallback, experimentation, and idempotency | Complete | `324fe75` |
 
 ## Remaining milestones
 
