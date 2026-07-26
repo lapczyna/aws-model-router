@@ -111,7 +111,7 @@ scope), all runnable without AWS credentials. No Bedrock calls, no AWS infrastru
       and is corrected here rather than left misleading
 - [x] `make ci` passes: Ruff, Black, mypy --strict, and pytest (83 tests, 98% coverage
       on `src/`) all clean
-- [ ] Committed and pushed (pending user confirmation)
+- [x] Committed and pushed
 
 ### Phase 3 — Bedrock provider adapter
 `BedrockModelProvider` behind `ModelProvider`, Converse API request/response mapping,
@@ -246,7 +246,7 @@ traffic unvalidated.
 | Phase | Status | Commit / tag |
 |---|---|---|
 | Phase 1 — Foundation and architecture | Complete | `b059a41` (+ `ee55487` username fix, `9210c11` plan update) |
-| Phase 2 — Domain model and local routing engine | Deliverables complete, pending commit confirmation | _pending_ |
+| Phase 2 — Domain model and local routing engine | Complete | `771f98d` |
 
 ## Remaining milestones
 
