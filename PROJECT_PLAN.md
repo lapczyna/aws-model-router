@@ -251,8 +251,8 @@ incorrect:
 
 * **License**: MIT. Change by editing `LICENSE` and the `license` field in
   `pyproject.toml` if a different license is preferred.
-* **GitHub repository owner/URL**: confirmed as `lapczynski.artur/aws-model-router`,
-  referenced in `.github/ISSUE_TEMPLATE/config.yml`.
+* **GitHub repository owner/URL**: confirmed as `lapczyna/aws-model-router` (matches the
+  configured git remote), referenced in `.github/ISSUE_TEMPLATE/config.yml`.
 * **Primary authorization model** (IAM vs. JWT authorizer) is explicitly deferred to
   Phase 5, per the original scope — not decided in Phase 1.
 * **Package layout**: `src/domain`, `src/application`, `src/adapters`, `src/handlers`,
