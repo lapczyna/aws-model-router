@@ -78,7 +78,7 @@ pytest config), pre-commit config, Makefile, ADR-001..010, this file.
       `docs/architecture/api-contracts.md`, `docs/architecture/domain-glossary.md` present
 - [x] Tooling configs present (`pyproject.toml`, `.pre-commit-config.yaml`, `Makefile`)
 - [x] No AWS infrastructure code, no Bedrock invocation code
-- [ ] Committed and pushed (pending user confirmation)
+- [x] Committed and pushed
 
 ### Phase 2 — Domain model and local routing engine
 Typed domain models, routing policy schema, model catalogue schema, capability/allowlist/
@@ -228,7 +228,7 @@ traffic unvalidated.
 
 | Phase | Status | Commit / tag |
 |---|---|---|
-| Phase 1 — Foundation and architecture | Deliverables complete, pending commit confirmation | _pending_ |
+| Phase 1 — Foundation and architecture | Complete | `b059a41` (+ `ee55487` username fix) |
 
 ## Remaining milestones
 
