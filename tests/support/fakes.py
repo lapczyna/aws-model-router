@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from domain.catalogue import ModelCapabilities, ModelDefinition, ModelPricing, ModelResolution
-from domain.enums import ModelResolutionType, ProviderName, QualityTier
+from domain.enums import LatencyPreference, ModelResolutionType, ProviderName, QualityTier
 from domain.errors import RoutingPolicyNotFoundError
 from domain.experiment import ExperimentPolicy
 from domain.fallback import FallbackPolicy
@@ -59,6 +59,9 @@ class InMemoryModelCatalogue:
                 return model
         return None
 
+    def all_models(self) -> Sequence[ModelDefinition]:
+        return tuple(self.models)
+
 
 @dataclass
 class InMemoryRoutingPolicyRepository:
@@ -87,6 +90,7 @@ def make_model(
     max_output_tokens: int = 4096,
     supports_tool_use: bool = False,
     supports_structured_output: bool = False,
+    typical_latency: LatencyPreference = LatencyPreference.BALANCED,
     input_price_per_1k_tokens: str = "0.003",
     output_price_per_1k_tokens: str = "0.015",
 ) -> ModelDefinition:
@@ -106,6 +110,7 @@ def make_model(
             supports_tool_use=supports_tool_use,
             supports_structured_output=supports_structured_output,
             supports_streaming=True,
+            typical_latency=typical_latency,
         ),
         pricing=ModelPricing(
             input_price_per_1k_tokens=Decimal(input_price_per_1k_tokens),

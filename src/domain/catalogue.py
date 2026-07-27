@@ -1,6 +1,12 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from domain.enums import ModelHealthStatus, ModelResolutionType, ProviderName, QualityTier
+from domain.enums import (
+    LatencyPreference,
+    ModelHealthStatus,
+    ModelResolutionType,
+    ProviderName,
+    QualityTier,
+)
 from domain.money import Money
 
 
@@ -21,6 +27,14 @@ class ModelCapabilities(BaseModel):
     supports_structured_output: bool = False
     supports_streaming: bool = False
     supported_modalities: tuple[str, ...] = ("text",)
+    typical_latency: LatencyPreference = Field(
+        default=LatencyPreference.BALANCED,
+        description=(
+            "A coarse, configured classification — never a measured guarantee. Surfaced "
+            "via GET /v1/models (Phase 5) so callers can weigh latency without seeing "
+            "raw model IDs."
+        ),
+    )
 
 
 class ModelPricing(BaseModel):

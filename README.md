@@ -11,13 +11,14 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 4 — Fallback, experimentation, and idempotency.** The routing engine
-> (Phase 2) and Bedrock invocation (Phase 3) are now composed by an
-> `InvocationOrchestrator` that adds policy-controlled fallback across models, weighted
-> deterministic experiment routing, and idempotency (concurrency-safe, with policy-gated
-> response replay). No AWS infrastructure is deployed yet — everything still runs and is
-> tested locally with zero AWS credentials. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for
-> the full phased roadmap.
+> **Status: Phase 5 — AWS CDK infrastructure and serverless API.** The router is now a
+> real, deployable serverless system: one AWS CDK v2 (Python) stack provisions a REST
+> API (API Gateway), a single shared Lambda function behind all six routes, and two
+> encrypted, on-demand DynamoDB tables (routing-decision audit + cross-instance-safe
+> idempotency). IAM (SigV4) authorization protects every `/v1/*` route; `/health`/`/ready`
+> stay public. Everything from Phases 1–4 is unchanged — the Lambda handler is a thin
+> adapter over the same `InvocationOrchestrator`/`RouteEvaluationService` built in earlier
+> phases. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -68,7 +69,7 @@ Full architecture, all four diagrams (component, request sequence, fallback sequ
 trust boundary), and the components involved:
 [`docs/architecture/overview.md`](docs/architecture/overview.md).
 
-## API surface (target contract)
+## API surface
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -134,8 +135,37 @@ invocation into the full request flow:
   `FallbackPolicy.maximum_attempts × RetryPolicy.max_attempts` — not an open-ended loop.
 
 Reference implementations (`adapters.memory`) provide thread-safe, single-process
-`IdempotencyStore` and `RoutingDecisionRepository` for local development and tests;
-DynamoDB-backed, multi-instance-safe implementations are Phase 5 scope.
+`IdempotencyStore` and `RoutingDecisionRepository` for local development and tests.
+DynamoDB-backed, multi-instance-safe implementations of the same protocols (below) are
+what a deployed Lambda actually uses.
+
+## AWS CDK infrastructure and serverless API
+
+[`infrastructure/`](infrastructure/) (AWS CDK v2, Python — ADR-004) provisions
+`ModelRouterStack`: one API Gateway REST API, one shared Lambda function behind all six
+routes (ADR-016), and two DynamoDB tables.
+
+* **Authorization** (ADR-015): `/health`/`/ready` are public; every `/v1/*` route
+  requires IAM (SigV4) authorization. Fine-grained per-application authorization
+  (allowlists, cost limits) is then enforced by the router's own policy engine.
+* **Lambda packaging** (ADR-017): a stable `Code.from_asset(..., bundling=...)`, not the
+  experimental `aws_lambda_python_alpha` construct. Bundling tries a Docker-free local
+  `pip install --platform manylinux2014_x86_64` path first (works even with no local
+  Docker daemon) and falls back to Docker-based bundling automatically.
+* **Storage** (ADR-018): a `DecisionsTable` (backs `GET /v1/decisions/{decisionId}`) and
+  an `IdempotencyTable`, both on-demand billing, AWS-managed encryption, TTL-based
+  expiry, and an environment-driven removal policy/point-in-time-recovery setting (`dev`:
+  `DESTROY`/no PITR; `prod`: `RETAIN`/PITR on).
+* Least-privilege IAM: the Lambda's Bedrock permissions are scoped to exactly the
+  catalogued models' ARNs (never `resources=["*"]`), computed at synth time from
+  `policies/model_catalogue.yaml`.
+* CDK template-assertion tests (`tests/infra/`, `pytest.mark.infra`) verify encryption,
+  retention, removal policy, IAM scoping, and endpoint authorization against the real
+  synthesized CloudFormation template — excluded from the default `pytest` run (real
+  asset bundling takes tens of seconds); run explicitly with `pytest -m infra`.
+
+See [`docs/operations/deployment-and-teardown.md`](docs/operations/deployment-and-teardown.md)
+for `cdk deploy`/`cdk destroy` usage and what `RemovalPolicy.RETAIN` means for `prod`.
 
 ## Try it locally
 
@@ -149,9 +179,20 @@ python scripts/evaluate_route.py --request scripts/examples/support_assistant_ba
 
 This resolves the calling application's policy, filters the model catalogue by
 capability/allowlist/quality-tier/token/cost, and prints a fully-explained
-`RoutingDecision` — the same decision `POST /v1/routes/evaluate` will return once the
-HTTP API exists (Phase 5). See [`scripts/examples/`](scripts/examples/) for more
-scenarios (cost-limit rejection, policy fallback, capability not permitted).
+`RoutingDecision` — the same decision `POST /v1/routes/evaluate` returns over HTTP. See
+[`scripts/examples/`](scripts/examples/) for more scenarios (cost-limit rejection, policy
+fallback, capability not permitted).
+
+To exercise the real Lambda handler code end to end — request parsing, routing, error
+mapping, response serialization — without deploying anything:
+
+```bash
+python scripts/invoke_lambda_locally.py --method POST --resource /v1/inference \
+    --body events/support_assistant_balanced.json
+```
+
+See [`scripts/invoke_lambda_locally.py`](scripts/invoke_lambda_locally.py)'s docstring
+for real-services mode (against a deployed stack).
 
 ## Architecture decisions
 
@@ -173,6 +214,10 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [012](docs/adr/0012-deterministic-experimentation.md) | Deterministic experimentation |
 | [013](docs/adr/0013-idempotency-strategy.md) | Idempotency strategy |
 | [014](docs/adr/0014-retry-and-cost-amplification-controls.md) | Retry and cost-amplification controls |
+| [015](docs/adr/0015-api-authorization-model.md) | API authorization model (IAM) |
+| [016](docs/adr/0016-single-shared-lambda-handler.md) | Single shared Lambda handler |
+| [017](docs/adr/0017-lambda-packaging-without-experimental-cdk-constructs.md) | Lambda packaging without experimental CDK constructs |
+| [018](docs/adr/0018-dynamodb-decision-and-idempotency-store-design.md) | DynamoDB decision and idempotency store design |
 
 ## Repository structure
 
@@ -182,26 +227,28 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 ├── docs/
 │   ├── adr/                 # Architecture Decision Records
 │   ├── architecture/        # Overview, diagrams, API contracts, domain glossary
-│   ├── operations/          # Runbooks, alarm response (from Phase 6)
+│   ├── operations/          # Deployment/teardown; runbooks, alarm response (from Phase 6)
 │   ├── security/            # Threat model, security architecture (from Phase 7)
 │   └── cost/                # Cost estimation & pricing-update guides (from Phase 6)
-├── events/                  # Sample API events for local Lambda invocation (from Phase 5)
-├── infrastructure/          # AWS CDK v2 (Python) app (from Phase 5)
+├── events/                  # Sample HTTP-shape request bodies for invoke_lambda_locally.py
+├── infrastructure/          # AWS CDK v2 (Python) app
 │   ├── app.py
 │   ├── cdk.json
+│   ├── config.py
+│   ├── bundling.py
 │   ├── stacks/
-│   ├── constructs/
-│   └── tests/
+│   └── cdk_constructs/       # storage (DynamoDB), lambda, api gateway constructs
 ├── policies/                # Version-controlled routing policy & model catalogue configuration
-├── scripts/                 # evaluate_route.py (local CLI) + example requests
+├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock_live_smoke_test.py
 ├── src/
 │   ├── domain/               # Pure Python domain models, routing strategies, reason codes
 │   ├── application/          # Orchestration: validation → policy → filter → cost → strategy → invoke
-│   ├── adapters/              # BedrockModelProvider, DynamoDB/SSM-backed repositories, metrics
-│   ├── handlers/              # Thin AWS Lambda entry points
+│   ├── adapters/              # BedrockModelProvider, DynamoDB-backed repositories, metrics
+│   ├── handlers/              # Thin AWS Lambda entry point (api_handler.py)
 │   └── shared/                 # Cross-cutting utilities (Clock, IdentifierGenerator, etc.)
 ├── tests/
 │   ├── contract/             # Provider/API contract tests
+│   ├── infra/                 # CDK template-assertion tests (pytest.mark.infra, opt-in)
 │   ├── integration/           # Multi-component, in-process tests
 │   └── unit/                  # Fast, isolated tests
 ├── pyproject.toml
@@ -220,8 +267,12 @@ full rule set.
 
 ## Local development setup
 
-Requires **Python 3.12**. AWS credentials are **not** required for anything in Phase 1–4
-(domain logic, routing engine, Bedrock adapter tests all use fakes/stubs).
+Requires **Python 3.12**. AWS credentials are **not** required for the domain logic,
+routing engine, Bedrock adapter tests, Lambda handler tests, or fake-mode local
+invocation (`scripts/invoke_lambda_locally.py`) — all use fakes/stubs/in-memory adapters.
+Real AWS credentials are only needed to actually `cdk deploy`/`cdk destroy`, run the CDK
+assertion tests' `cdk synth` (`pytest -m infra` still needs no credentials, just a local
+`aws-cdk-lib`/`pip` — see below), or invoke `invoke_lambda_locally.py --use-real-services`.
 
 ```bash
 # Create and activate a virtual environment
@@ -233,6 +284,9 @@ source .venv/bin/activate
 
 # Install runtime + development dependencies
 pip install -e ".[dev]"
+
+# Also install AWS CDK (only needed for infrastructure/ work or `pytest -m infra`)
+pip install -e ".[dev,infra]"
 
 # Install git hooks
 pre-commit install
@@ -282,8 +336,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 1 | Foundation and architecture |
 | 2 | Domain model and local routing engine (no AWS) |
 | 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) |
-| 4 | Fallback, experimentation, and idempotency *(this phase)* |
-| 5 | AWS CDK infrastructure and serverless API |
+| 4 | Fallback, experimentation, and idempotency |
+| 5 | AWS CDK infrastructure and serverless API *(this phase)* |
 | 6 | Observability, auditability, and cost governance |
 | 7 | Security and resilience hardening |
 | 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |

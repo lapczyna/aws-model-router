@@ -1,0 +1,7 @@
+# Runtime dependencies bundled INTO the Lambda deployment package (infrastructure/bundling.py).
+# Kept in sync with the `dependencies` list in pyproject.toml — boto3 is bundled
+# explicitly (not relying on the Lambda runtime's built-in, unpredictable-version copy)
+# specifically because the Bedrock Converse API needs a minimum botocore version.
+boto3>=1.34.116,<2.0
+pydantic>=2.6,<3.0
+PyYAML>=6.0,<7.0

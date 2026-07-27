@@ -21,5 +21,23 @@ Developer and operational scripts.
   python scripts/bedrock_live_smoke_test.py --model-alias economical-text-primary --confirm-cost
   ```
 
-Later phases add: deployment helpers (Phase 5) and load/fault-injection scripts
-(Phase 9).
+* [`invoke_lambda_locally.py`](invoke_lambda_locally.py) — invokes the real Lambda
+  handler code (`src/handlers/api_handler.py`) against a synthetic API Gateway proxy
+  event, without deploying anything. Defaults to fake mode: no AWS credentials required,
+  using an in-process `EchoModelProvider` (never a real model) plus in-memory
+  idempotency/decision stores, so it exercises the actual request parsing, routing,
+  error mapping, and response serialization end to end. `--use-real-services` instead
+  calls `build_services()` against a deployed stack (requires AWS credentials and the
+  `DECISIONS_TABLE_NAME`/`IDEMPOTENCY_TABLE_NAME` environment variables — see
+  [`docs/operations/deployment-and-teardown.md`](../docs/operations/deployment-and-teardown.md));
+  `POST /v1/inference` in that mode additionally requires `--confirm-cost`, since it
+  makes a real, billable Bedrock call. See [`events/`](../events/) for sample HTTP-shape
+  (camelCase) request bodies.
+
+  ```bash
+  python scripts/invoke_lambda_locally.py --method GET --resource /v1/models
+  python scripts/invoke_lambda_locally.py --method POST --resource /v1/inference \
+      --body events/support_assistant_balanced.json
+  ```
+
+Later phases add: load/fault-injection scripts (Phase 9).

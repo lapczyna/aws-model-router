@@ -30,6 +30,14 @@ def test_find_by_capability_returns_only_matching_models() -> None:
     assert none_found == ()
 
 
+def test_all_models_returns_every_catalogued_model() -> None:
+    catalogue = LocalFileModelCatalogue(FIXTURES / "catalogue_valid.yaml")
+
+    aliases = {model.model_alias for model in catalogue.all_models()}
+
+    assert aliases == {"model-a", "model-b"}
+
+
 def test_invalid_schema_raises_configuration_error() -> None:
     with pytest.raises(ConfigurationError):
         LocalFileModelCatalogue(FIXTURES / "catalogue_invalid_schema.yaml")

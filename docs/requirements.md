@@ -133,8 +133,9 @@ NFR-2.2. All AWS resources follow least-privilege IAM; Lambda execution roles ar
 to the specific resources and, where feasible, specific model/inference-profile ARNs they
 require.
 
-NFR-2.3. Authentication is not based on API keys as a primary identity mechanism. See the
-authorization ADR added in Phase 5.
+NFR-2.3. Authentication is not based on API keys as a primary identity mechanism —
+clients authenticate via IAM SigV4 (see
+[ADR-015](adr/0015-api-authorization-model.md)).
 
 NFR-2.4. No raw prompt or response content is logged or persisted by default.
 

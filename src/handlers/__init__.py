@@ -1,4 +1,6 @@
-"""Thin AWS Lambda entry points: parse event, call an application service, format response.
+"""Thin AWS Lambda entry points: parse event, call an application service, format
+response. No business logic belongs in this package (CONTRIBUTING.md).
 
-No business logic belongs in this package. Implementation begins in Phase 5.
+`api_handler.py` (Phase 5) is the single Lambda entry point for all six REST API
+routes (ADR-016) — dispatch, request/response mapping, and error mapping live here.
 """

@@ -57,7 +57,10 @@ What else was evaluated, and why was it not chosen?
 | [ADR-012](0012-deterministic-experimentation.md) | Deterministic experimentation | Accepted |
 | [ADR-013](0013-idempotency-strategy.md) | Idempotency strategy | Accepted |
 | [ADR-014](0014-retry-and-cost-amplification-controls.md) | Retry and cost-amplification controls | Accepted |
+| [ADR-015](0015-api-authorization-model.md) | API authorization model | Accepted |
+| [ADR-016](0016-single-shared-lambda-handler.md) | Single shared Lambda handler | Accepted |
+| [ADR-017](0017-lambda-packaging-without-experimental-cdk-constructs.md) | Lambda packaging without experimental CDK constructs | Accepted |
+| [ADR-018](0018-dynamodb-decision-and-idempotency-store-design.md) | DynamoDB decision and idempotency store design | Accepted |
 
-Future ADRs (API authorization model, cross-Region resilience, Responsible AI Gateway
-placement) are added in the phases where those decisions are made (Phases 5 and 7
-respectively — see `PROJECT_PLAN.md`).
+Future ADRs (cross-Region resilience, Responsible AI Gateway placement) are added in the
+phase where those decisions are made (Phase 7 — see `PROJECT_PLAN.md`).

@@ -44,6 +44,8 @@ class ModelCatalogue(Protocol):
 
     def get_by_alias(self, model_alias: str) -> ModelDefinition | None: ...
 
+    def all_models(self) -> Sequence[ModelDefinition]: ...
+
 
 class RoutingPolicyRepository(Protocol):
     """Resolves the effective `RoutingPolicy` for an application.

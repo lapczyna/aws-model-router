@@ -39,6 +39,7 @@ class LocalFileModelCatalogue:
                 f"Duplicate model_alias values in catalogue at {catalogue_path}: {sorted(duplicates)}"
             )
 
+        self._models = tuple(models)
         self._models_by_alias = {model.model_alias: model for model in models}
         self._models_by_capability: dict[str, list[ModelDefinition]] = defaultdict(list)
         for model in models:
@@ -54,3 +55,6 @@ class LocalFileModelCatalogue:
 
     def get_by_alias(self, model_alias: str) -> ModelDefinition | None:
         return self._models_by_alias.get(model_alias)
+
+    def all_models(self) -> Sequence[ModelDefinition]:
+        return self._models

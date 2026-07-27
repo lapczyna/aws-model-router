@@ -27,6 +27,7 @@ models:
       supports_structured_output: false
       supports_streaming: true
       supported_modalities: [text]
+      typical_latency: low
     pricing:
       currency: USD
       input_price_per_1k_tokens: "0.00025"
@@ -50,6 +51,7 @@ models:
       supports_structured_output: true
       supports_streaming: true
       supported_modalities: [text]
+      typical_latency: balanced
     pricing:
       currency: USD
       input_price_per_1k_tokens: "0.003"
@@ -77,6 +79,7 @@ models:
       supports_structured_output: false
       supports_streaming: true
       supported_modalities: [text]
+      typical_latency: balanced
     pricing:
       currency: USD
       input_price_per_1k_tokens: "0.008"
@@ -100,6 +103,7 @@ models:
       supports_structured_output: true
       supports_streaming: true
       supported_modalities: [text]
+      typical_latency: high
     pricing:
       currency: USD
       input_price_per_1k_tokens: "0.015"

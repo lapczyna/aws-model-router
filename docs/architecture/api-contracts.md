@@ -1,10 +1,14 @@
 # API Contracts
 
-> **Status:** these contracts are the target design established in Phase 1. They are
-> implemented as an in-process, cloud-independent routing engine in Phase 2, wired to a
-> real Bedrock adapter in Phase 3, and exposed over API Gateway + Lambda starting in
-> Phase 5. Until then, no HTTP endpoint actually exists — this document defines the
-> contract everything else is built toward.
+> **Status:** these contracts were the target design established in Phase 1; they are
+> now live. Phase 2 built the in-process, cloud-independent routing engine; Phase 3 wired
+> in a real Bedrock adapter; Phase 5 exposes all six endpoints below over a real API
+> Gateway REST API backed by a single shared Lambda function
+> (`infrastructure/stacks/model_router_stack.py`, [ADR-016](../adr/0016-single-shared-lambda-handler.md)).
+> Authorization is IAM (SigV4) for every `/v1/*` route
+> ([ADR-015](../adr/0015-api-authorization-model.md)); `/health`/`/ready` are
+> unauthenticated. See [`docs/operations/deployment-and-teardown.md`](../operations/deployment-and-teardown.md)
+> for how to deploy and reach a live instance of this API.
 
 ## Conventions
 
@@ -15,9 +19,9 @@
 * Every response includes a `requestId`. Every executed or evaluated routing decision
   additionally includes a `decisionId`.
 * Errors follow the `ErrorResponse` shape (see below) and a stable `errorCode`.
-* Clients authenticate via IAM SigV4 or a JWT bearer token, depending on the deployment's
-  configured authorizer (see the authorization ADR added in Phase 5). API keys, if used
-  at all, only gate usage plans/throttling — they are never treated as identity.
+* Clients authenticate via IAM SigV4 ([ADR-015](../adr/0015-api-authorization-model.md)).
+  API keys, if used at all, only gate usage plans/throttling — they are never treated as
+  identity.
 
 ## Endpoints
 
@@ -108,6 +112,12 @@ is reflected in the decision's reason codes.
 | 429 | `THROTTLED` | Router-level throttling (API Gateway usage plan) | N/A |
 | 502 | `PROVIDER_UNAVAILABLE` | Primary and all eligible fallbacks failed | Yes, exhausted |
 | 500 | `INTERNAL_ERROR` | Unexpected router failure | No |
+
+`401`/`403` (missing or invalid SigV4 signature) and `429` (usage-plan throttling) are
+raised by API Gateway itself, before the request ever reaches the Lambda handler — they
+use API Gateway's own error body shape, not the `ErrorResponse` shape below. Every other
+row in this table is raised by the Lambda handler (`src/handlers/error_mapping.py`) and
+does use `ErrorResponse`.
 
 Example error body:
 
@@ -230,7 +240,7 @@ operator/admin scope, added when administrative access is introduced).
     "estimatedCostUsd": 0.0021
   },
   "invocationAttempts": [
-    { "modelAlias": "balanced-text-primary", "status": "SUCCEEDED", "latencyMs": 812 }
+    { "modelAlias": "balanced-text-primary", "status": "succeeded", "latencyMs": 812 }
   ],
   "requestId": "req_01J8X8QK8N5V6C1Z7Y2E4D3A9B"
 }
@@ -251,13 +261,14 @@ Basic process liveness. No dependencies checked.
 
 ### `GET /ready`
 
-Verifies that required configuration (routing policies, model catalogue) can be loaded.
-
 ```json
-{ "status": "ready", "policyVersion": 3, "modelCatalogueVersion": 7 }
+{ "status": "ready", "modelCatalogueVersion": 7 }
 ```
 
-`503` with `{"status": "not_ready", "reason": "..."}` if configuration cannot be loaded.
+Reaching this response at all means required configuration (the model catalogue) was
+already loaded successfully at cold start — a Lambda execution environment that fails to
+load it never reaches a running state to answer any request, `/ready` included, so there
+is no separate `"not_ready"` response body from this route.
 
 ---
 

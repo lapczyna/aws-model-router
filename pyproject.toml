@@ -22,11 +22,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 
-# Runtime dependencies for the domain/application/adapter layers (src/).
-# Infrastructure (CDK) dependencies are declared separately under infrastructure/
-# to keep the deployable Lambda footprint minimal.
+# Runtime dependencies for the domain/application/adapter layers (src/) — this is what
+# actually ships inside the Lambda deployment package (infrastructure/bundling.py), so
+# it's kept minimal. CDK (infrastructure/) and dev-only tooling are separate extras
+# groups below, never bundled into the Lambda package.
 dependencies = [
-    "boto3>=1.34,<2.0",
+    "boto3>=1.34.116,<2.0",
     "pydantic>=2.6,<3.0",
     "PyYAML>=6.0,<7.0",
 ]
@@ -41,6 +42,11 @@ dev = [
     "pre-commit>=3.7,<4.0",
     "boto3-stubs[bedrock-runtime,dynamodb,ssm]>=1.34,<2.0",
     "types-PyYAML>=6.0,<7.0",
+    "moto[dynamodb]>=5.0,<6.0",
+]
+infra = [
+    "aws-cdk-lib>=2.150,<3.0",
+    "constructs>=10.3,<11.0",
 ]
 
 [build-system]
@@ -96,8 +102,8 @@ include = '\.pyi?$'
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src"
-files = ["src", "tests"]
+mypy_path = ["src", "infrastructure"]
+files = ["src", "tests", "infrastructure"]
 strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -124,11 +130,12 @@ warn_required_dynamic_aliases = true
 minversion = "8.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers -m \"not infra\""
 markers = [
     "unit: fast, isolated unit tests with no I/O",
     "integration: tests exercising multiple in-process components together",
     "contract: tests validating request/response and provider contracts",
+    "infra: CDK template-assertion tests; excluded by default (real asset bundling, ~30-60s) — run explicitly with `pytest -m infra`",
 ]
 
 [tool.coverage.run]

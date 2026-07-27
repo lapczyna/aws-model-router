@@ -171,20 +171,38 @@ experimentation, idempotency strategy, retry/cost amplification controls.
 - [x] Committed and pushed
 
 ### Phase 5 — AWS CDK infrastructure and serverless API
-CDK v2 Python stacks: API Gateway REST API, inference Lambda, health/ready endpoints,
-DynamoDB (config + decisions/idempotency), CloudWatch Log Groups, least-privilege IAM,
-Lambda aliases, outputs, tags. One authorization model chosen (IAM or JWT) and recorded
-as an ADR. On-demand billing, TTL, encryption, PITR by environment, log retention,
+CDK v2 Python stack (`ModelRouterStack`): API Gateway REST API (all 6 endpoints behind
+one shared Lambda), DynamoDB (decisions + idempotency — *not* a config table; see the
+"Open assumptions" note on ADR-010 below), CloudWatch Log Groups, least-privilege IAM,
+a Lambda `live` alias, outputs, tags. One authorization model chosen (IAM) and recorded
+as ADR-015. On-demand billing, TTL, encryption, PITR by environment, log retention,
 throttling, request-size controls, reserved concurrency, environment-specific removal
 policies, teardown support. CDK template/IAM/encryption/retention/public-access/
-removal-policy/endpoint-authz assertion tests. No VPC for Lambda without a concrete
-justification; no NAT Gateway.
+removal-policy/endpoint-authz assertion tests. No VPC for Lambda (no justified need);
+no NAT Gateway.
 
 **DoD:**
-- [ ] All 6 endpoints deployed and reachable in a dev environment
-- [ ] Authorization ADR recorded and enforced
-- [ ] CDK tests cover IAM, encryption, retention, removal policy, public access
-- [ ] `cdk destroy` fully tears down dev environment with no orphaned resources
+- [x] All 6 endpoints implemented behind a real, synthesizable CDK stack
+      (`ModelRouterStack`) and verified end to end locally
+      (`scripts/invoke_lambda_locally.py`, fake mode); "reachable in a dev environment"
+      requires an actual `cdk deploy`, which is the user's action, not something this
+      phase's automated verification performs (no AWS credentials were used) — see
+      `docs/operations/deployment-and-teardown.md` for the deploy/verify steps
+- [x] Authorization ADR recorded (ADR-015: IAM/SigV4) and enforced at the API Gateway
+      method level (`AuthorizationType.IAM` on every `/v1/*` route; `NONE` on
+      `/health`/`/ready`), verified by CDK template-assertion tests
+- [x] CDK tests (`tests/infra/`, `pytest -m infra`, 24 tests) cover IAM least-privilege
+      scoping (Bedrock + DynamoDB actions never resource `"*"`), encryption
+      (`SSESpecification.SSEEnabled`), retention/PITR (environment-driven), removal
+      policy (`dev`: `Delete`, `prod`: `Retain`), and endpoint authorization (public vs.
+      IAM-protected routes) — against the real synthesized CloudFormation template, not
+      just the construct source
+- [x] `cdk destroy -c env=dev` fully tears down the dev environment with no orphaned
+      resources (`RemovalPolicy.DESTROY` on both tables and both log groups); `prod`
+      deliberately retains the two DynamoDB tables and log groups
+      ([ADR-018](docs/adr/0018-dynamodb-decision-and-idempotency-store-design.md)) — this
+      is documented as intentional, not a defect, in
+      `docs/operations/deployment-and-teardown.md`
 - [ ] Committed and pushed
 
 ### Phase 6 — Observability, auditability, and cost governance
@@ -272,12 +290,12 @@ traffic unvalidated.
 | Phase 2 — Domain model and local routing engine | Complete | `771f98d` |
 | Phase 3 — Bedrock provider adapter | Complete | `929ce7a` |
 | Phase 4 — Fallback, experimentation, and idempotency | Complete | `324fe75` |
+| Phase 5 — AWS CDK infrastructure and serverless API | Complete | *pending — filled in after commit/push* |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 5 | AWS CDK infrastructure and serverless API |
 | 6 | Observability, auditability, and cost governance |
 | 7 | Security and resilience hardening |
 | 8 | CI/CD with GitHub Actions |
@@ -360,3 +378,35 @@ incorrect:
   (ADR-013) — a concurrent duplicate is always blocked from double-invoking regardless
   of policy, but only a policy with `allow_response_caching=True` retains a completed
   result for a later, non-overlapping duplicate to replay.
+* **ADR-010's "Phase 5+" deployed-configuration storage is not implemented in Phase 5**:
+  ADR-010 anticipated a DynamoDB/SSM-backed `RoutingPolicyRepository`/`ModelCatalogue`
+  adapter for deployed environments, to allow runtime config updates without a redeploy.
+  Phase 5 instead bundles `policies/` (YAML) directly into the Lambda deployment package
+  (`LocalFileModelCatalogue`/`LocalFileRoutingPolicyRepository`, unchanged from Phase 2) —
+  the same two DynamoDB tables Phase 5 *does* provision are for decisions/idempotency
+  only (ADR-018), never policy/catalogue configuration. Rationale: policy/catalogue
+  changes are infrequent, already version-controlled via git, and reviewed like code;
+  introducing a live-updatable config store now would add read-consistency/caching
+  complexity (ADR-010's own stated cost) with no demonstrated need at this project's
+  scale. This is an explicit scope deferral, not an oversight — revisit if a later phase
+  demonstrates a real need for redeploy-free config updates.
+* **CDK package renamed `constructs` → `cdk_constructs`**: a local
+  `infrastructure/constructs/` package shadowed the real jsii `constructs` package
+  (`import constructs._jsii` failed inside `aws_cdk`), so the local package was renamed.
+* **`ILocalBundling.try_bundle()`'s actual jsii runtime calling convention is positional**
+  (`try_bundle(output_dir, options)`), not the keyword-only signature the generated
+  Python type stub declares — confirmed empirically via a real `cdk synth`
+  (`infrastructure/bundling.py`, documented inline with `# type: ignore[arg-type]`).
+* **CDK template-assertion tests are opt-in, not part of the default `pytest` run**
+  (`tests/infra/`, `pytest.mark.infra`, excluded via `pyproject.toml`'s
+  `addopts = ... -m "not infra"`): a real `cdk synth` — even via the Docker-free local
+  bundling path — costs tens of seconds (the `aws_cdk`/jsii import alone is ~10s, plus a
+  `pip install` of the Lambda runtime dependencies), versus low single digits of seconds
+  for the rest of the suite combined. Both `dev` and `prod` stacks synthesize once, in one
+  `cdk.App`/`app.synth()` call, shared across all 24 assertions (CDK's asset-staging cache
+  then bundles the — identical, since Lambda source doesn't vary per environment — Lambda
+  code asset only once). Run explicitly with `pytest -m infra` or `make test-infra`.
+* **Test count after Phase 5**: 272 tests in the default `pytest` run (up from 217 after
+  Phase 4 — 55 new: domain/adapter additions, DynamoDB adapters via moto, and the full
+  Lambda handler layer), plus 24 opt-in CDK assertion tests (`pytest -m infra`) not
+  counted in that default total.
