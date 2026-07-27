@@ -269,7 +269,7 @@ explicitly not claiming routing alone provides AI safety.
       turned out to be inaccurate once actually tested — see Open Assumptions),
       raw prompt content never appears in logs or persisted audit records, adversarial
       decision-ID lookups never 500
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 ### Phase 8 — CI/CD with GitHub Actions
 GitHub OIDC for AWS auth (no long-lived keys). PR workflow: install, Ruff, Black check,
@@ -326,7 +326,7 @@ traffic unvalidated.
 | Phase 4 — Fallback, experimentation, and idempotency | Complete | `324fe75` |
 | Phase 5 — AWS CDK infrastructure and serverless API | Complete | `0b88448` |
 | Phase 6 — Observability, auditability, and cost governance | Complete | `e2a6cd3` |
-| Phase 7 — Security and resilience hardening | Complete | *pending — filled in after commit/push* |
+| Phase 7 — Security and resilience hardening | Complete | `a9cb141` |
 
 ## Remaining milestones
 
