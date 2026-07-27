@@ -203,7 +203,7 @@ no NAT Gateway.
       ([ADR-018](docs/adr/0018-dynamodb-decision-and-idempotency-store-design.md)) — this
       is documented as intentional, not a defect, in
       `docs/operations/deployment-and-teardown.md`
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 ### Phase 6 — Observability, auditability, and cost governance
 Structured JSON logs (sanitized metadata only), full custom metrics set, low-cardinality
@@ -290,7 +290,7 @@ traffic unvalidated.
 | Phase 2 — Domain model and local routing engine | Complete | `771f98d` |
 | Phase 3 — Bedrock provider adapter | Complete | `929ce7a` |
 | Phase 4 — Fallback, experimentation, and idempotency | Complete | `324fe75` |
-| Phase 5 — AWS CDK infrastructure and serverless API | Complete | *pending — filled in after commit/push* |
+| Phase 5 — AWS CDK infrastructure and serverless API | Complete | `0b88448` |
 
 ## Remaining milestones
 
