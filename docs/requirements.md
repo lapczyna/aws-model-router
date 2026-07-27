@@ -129,17 +129,29 @@ estimate-vs-billing gap explanation.
 ### NFR-2 — Security
 
 NFR-2.1. Clients cannot select arbitrary provider model IDs; only trusted, policy-resolved
-aliases.
+aliases — an unrecognized request field is never read by the request-mapping layer, so
+it cannot influence which model is invoked (see
+[`docs/security/threat-model.md`](security/threat-model.md)'s T5).
 
 NFR-2.2. All AWS resources follow least-privilege IAM; Lambda execution roles are scoped
 to the specific resources and, where feasible, specific model/inference-profile ARNs they
-require.
+require — reviewed and tightened to the exact DynamoDB actions each adapter uses (see
+[ADR-022](adr/0022-least-privilege-iam-review.md)).
 
 NFR-2.3. Authentication is not based on API keys as a primary identity mechanism —
 clients authenticate via IAM SigV4 (see
-[ADR-015](adr/0015-api-authorization-model.md)).
+[ADR-015](adr/0015-api-authorization-model.md), and
+[`docs/security/threat-model.md`](security/threat-model.md)'s T2 for this model's one
+documented open gap: IAM proves identity, not a binding to a specific `applicationId`).
 
-NFR-2.4. No raw prompt or response content is logged or persisted by default.
+NFR-2.4. No raw prompt or response content is logged or persisted by default — verified
+end to end by an abuse-case test (`tests/unit/handlers/test_abuse_cases.py`), not just
+by convention.
+
+See [`docs/security/threat-model.md`](security/threat-model.md) for the full threat
+enumeration these requirements defend against, and
+[`docs/security/security-architecture.md`](security/security-architecture.md) for the
+layer-by-layer narrative (Phase 7).
 
 ### NFR-3 — Reliability
 
@@ -148,6 +160,11 @@ during provider incidents.
 
 NFR-3.2. The router degrades predictably: when no eligible model exists, it returns a
 clear, typed error (`NO_ELIGIBLE_MODEL`) rather than an ambiguous failure.
+
+NFR-3.3. Region-level resilience mechanisms (cross-Region inference profiles) are
+evaluated and documented, including their data-residency, IAM, and cost trade-offs, even
+where not adopted in the base deployment (see
+[ADR-023](adr/0023-cross-region-inference-profile-resilience.md)).
 
 ### NFR-4 — Observability
 

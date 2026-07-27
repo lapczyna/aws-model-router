@@ -244,15 +244,31 @@ each. Cross-Region inference profiles evaluated as an optional resilience mechan
 data-residency/IAM/cost trade-offs documented. `SECURITY.md` updates, threat model,
 security architecture guide, incident-response guide, disaster recovery guide,
 least-privilege IAM review, resilience test plan, abuse-case tests. Documented
-relationship with `aws-responsible-ai-gateway` (both orderings discussed, one recommended
-with justification) — explicitly not claiming routing alone provides AI safety.
+relationship with a Responsible AI Gateway / content-safety layer (both orderings
+discussed, one recommended with justification — see the correction note below) —
+explicitly not claiming routing alone provides AI safety.
 
 **DoD:**
-- [ ] Threat model document covers every listed threat category
-- [ ] Every listed control is implemented or explicitly documented as out of scope with
-      rationale
-- [ ] Responsible AI Gateway placement documented with a recommendation
-- [ ] Abuse-case tests added
+- [x] Threat model document covers every listed threat category —
+      `docs/security/threat-model.md`: 22 threats across the 5 trust boundaries from
+      `docs/architecture/overview.md` plus AI content safety, each with a mitigation,
+      residual risk, and status (13 Mitigated, 6 Accepted, 3 Deferred)
+- [x] Every listed control is implemented or explicitly documented as out of scope with
+      rationale — including a real least-privilege IAM tightening (ADR-022: DynamoDB
+      grants narrowed from `grant_read_write_data()` to the exact 2–3 actions each
+      adapter uses, verified by a new CDK assertion test) and a new detective control
+      for the one open authorization gap (T2: `caller_principal_arn` now logged on every
+      request)
+- [x] Responsible AI Gateway placement documented with a recommendation — ADR-024
+      recommends integrating Bedrock Guardrails into the same Bedrock invocation this
+      router already makes, over a separate gateway component; corrects the original
+      scope wording ("`aws-responsible-ai-gateway`") since no project of that exact name
+      exists — grounded in real, verified facts about Amazon Bedrock Guardrails instead
+- [x] Abuse-case tests added — `tests/unit/handlers/test_abuse_cases.py` (10 tests):
+      unrecognized-field smuggling has zero effect (and corrected a doc claim that
+      turned out to be inaccurate once actually tested — see Open Assumptions),
+      raw prompt content never appears in logs or persisted audit records, adversarial
+      decision-ID lookups never 500
 - [ ] Committed and pushed
 
 ### Phase 8 — CI/CD with GitHub Actions
@@ -310,12 +326,12 @@ traffic unvalidated.
 | Phase 4 — Fallback, experimentation, and idempotency | Complete | `324fe75` |
 | Phase 5 — AWS CDK infrastructure and serverless API | Complete | `0b88448` |
 | Phase 6 — Observability, auditability, and cost governance | Complete | `e2a6cd3` |
+| Phase 7 — Security and resilience hardening | Complete | *pending — filled in after commit/push* |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 7 | Security and resilience hardening |
 | 8 | CI/CD with GitHub Actions |
 | 9 | Performance, load testing, and portfolio polish |
 | 10 | Advanced extensions (optional — explicit request only) |
@@ -455,3 +471,36 @@ incorrect:
   `EmfMetricsPublisher`, structured-logging formatter, and orchestrator/route-service
   wiring), plus 38 opt-in CDK assertion tests (`pytest -m infra`, up from 24 — 14 new for
   `ObservabilityConstruct`).
+* **No project named exactly `aws-responsible-ai-gateway` exists** (Phase 7,
+  ADR-024) — the original scope's wording assumed a specific named repository; a web
+  search found none by that exact name. The real, current, first-party building block
+  is Amazon Bedrock Guardrails; ADR-024's recommendation (integrate Guardrails into the
+  same Bedrock invocation this router already makes, rather than a separate gateway
+  component) is grounded in verified facts about Guardrails, not a fictitious project.
+* **Least-privilege IAM review found a real, fixable over-grant** (ADR-022, Phase 7):
+  `dynamodb.Table.grant_read_write_data()` had been in place since Phase 5 without
+  checking it against what the two DynamoDB adapters actually call — they only ever use
+  `GetItem`/`PutItem`/`DeleteItem`, never `Scan`/`Query`/`BatchGetItem`/`BatchWriteItem`/
+  `UpdateItem`/`DescribeTable`. Replaced with explicit, minimal `table.grant(...)` calls
+  per table, verified by a new CDK assertion test asserting the exact action sets and
+  that `Scan`/`Query` are never granted.
+* **Self-correcting a documentation claim before it shipped** (Phase 7): the threat
+  model's first draft claimed unrecognized request fields are rejected via pydantic's
+  `extra="forbid"`. Writing the abuse-case test to verify this (rather than trusting the
+  claim) showed the real mechanism is different: `parse_inference_request` extracts only
+  named fields from the raw dict, so an unrecognized field is silently ignored, never
+  even reaching a domain model's constructor — `extra="forbid"` guards this project's
+  own code against a future bug, not the client input path directly. Both `threat-model.md`
+  and `security-architecture.md` were corrected to describe the actual mechanism before
+  this phase's report was written, per the standing "never claim success without
+  verification" rule — this is exactly that rule catching a real inaccuracy.
+* **`applicationId`-spoofing (threat model T2) is the one significant open finding**
+  carried out of this phase: IAM authorizes *that* a caller may call the API, not *which*
+  `applicationId` it may claim (a documented ADR-015 limitation since Phase 5). Phase 7
+  adds a real detective control (`caller_principal_arn` now logged on every request,
+  `_ALLOWED_EXTRA_KEYS` in `structured_logging.py`) and a concrete, scoped design for the
+  preventive fix (`RoutingPolicy.allowed_caller_principal_arns`, not yet built) — not a
+  silent gap.
+* **Test count after Phase 7**: 313 tests in the default `pytest` run (up from 303 after
+  Phase 6 — 10 new abuse-case tests), plus 39 opt-in CDK assertion tests (`pytest -m
+  infra`, up from 38 — 1 new for the tightened DynamoDB IAM grants).

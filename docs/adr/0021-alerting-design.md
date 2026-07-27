@@ -56,8 +56,10 @@ alarm condition.
 * `EstimatedDailySpendAlarm` is explicitly "guidance" (ADR-019: estimated cost is never
   billed cost) — its alarm description says so, so an on-call responder never mistakes
   it for an AWS Budgets/billing alarm.
-* Adding a real notification channel later (e.g. a Slack chatbot integration in Phase 7)
-  is an `sns.Subscription` addition to the existing topic, not an alarm redesign.
+* Adding a real notification channel later (e.g. a Slack chatbot integration) is an
+  `sns.Subscription` addition to the existing topic, not an alarm redesign — not built
+  in Phase 7 either, for the same reason it wasn't built here (no real endpoint to
+  target).
 
 ## Alternatives considered
 * **AWS Chatbot / Slack integration built in now** — rejected: requires a real,

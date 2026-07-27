@@ -64,6 +64,6 @@ What else was evaluated, and why was it not chosen?
 | [ADR-019](0019-observability-approach.md) | Observability approach — structured logging and EMF custom metrics | Accepted |
 | [ADR-020](0020-model-health-signal-scope.md) | Model health signal — scope and derivation | Accepted |
 | [ADR-021](0021-alerting-design.md) | Alerting design — CloudWatch alarms and a single SNS topic | Accepted |
-
-Future ADRs (cross-Region resilience, Responsible AI Gateway placement) are added in the
-phase where those decisions are made (Phase 7 — see `PROJECT_PLAN.md`).
+| [ADR-022](0022-least-privilege-iam-review.md) | Least-privilege IAM review | Accepted |
+| [ADR-023](0023-cross-region-inference-profile-resilience.md) | Cross-Region inference profile resilience evaluation | Accepted |
+| [ADR-024](0024-responsible-ai-gateway-placement.md) | Responsible AI Gateway placement | Accepted |

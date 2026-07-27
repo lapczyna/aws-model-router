@@ -180,6 +180,33 @@ def test_lambda_role_dynamodb_permissions_scoped_to_tables_not_wildcard(
         assert "*" not in _as_list(statement["Resource"])
 
 
+def test_dynamodb_grants_are_scoped_to_the_exact_actions_each_adapter_uses(
+    dev_stack: "SynthesizedStack",
+) -> None:
+    # ADR-022: grant_read_write_data() was replaced with explicit per-table action
+    # lists matching exactly what DynamoDbRoutingDecisionRepository/
+    # DynamoDbIdempotencyStore call — never Scan/Query/BatchGetItem/BatchWriteItem/
+    # UpdateItem/DescribeTable, none of which either adapter uses.
+    dynamodb_statements = _iam_statements(dev_stack, action_prefix="dynamodb:")
+    action_sets = [frozenset(_as_list(statement["Action"])) for statement in dynamodb_statements]
+
+    assert frozenset({"dynamodb:GetItem", "dynamodb:PutItem"}) in action_sets
+    assert frozenset({"dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"}) in action_sets
+    never_granted = {
+        "dynamodb:Scan",
+        "dynamodb:Query",
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DescribeTable",
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator",
+    }
+    all_granted_actions = {action for actions in action_sets for action in actions}
+    assert not (never_granted & all_granted_actions)
+
+
 def test_health_and_ready_routes_require_no_authorization(dev_stack: "SynthesizedStack") -> None:
     from aws_cdk.assertions import Match
 

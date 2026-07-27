@@ -11,14 +11,15 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 6 — Observability, auditability, and cost governance.** The deployed
-> system (Phase 5) now ships structured JSON logs, a CloudWatch dashboard, and 7 alarms
-> (Lambda errors/throttles, API 5xx, provider failure, fallback rate, no-eligible-model,
-> estimated-spend guidance) backed by custom metrics published as CloudWatch Embedded
-> Metric Format log lines — no extra `PutMetricData` calls or IAM permissions. The model
-> health signal modeled since Phase 2 (`ModelHealth`/`MODEL_UNHEALTHY`) is finally wired
-> into candidate filtering, derived from observed invocation outcomes. See
-> [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap.
+> **Status: Phase 7 — Security and resilience hardening.** A full threat model (22
+> threats across 5 trust boundaries plus AI content safety —
+> [`docs/security/threat-model.md`](docs/security/threat-model.md)), a least-privilege
+> IAM review that found and fixed a real over-broad DynamoDB grant, abuse-case tests
+> (data-leakage, field-smuggling, adversarial input), and documented positions on
+> cross-Region resilience and Responsible AI Gateway placement. Routing remains
+> deterministic and explainable — this project makes no claim that routing alone
+> provides AI safety. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased
+> roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -201,6 +202,40 @@ Full guides: [`docs/operations/observability.md`](docs/operations/observability.
 (routine operational tasks), and [`docs/cost/cost-estimation-guide.md`](docs/cost/cost-estimation-guide.md)
 (the estimate-vs-billing gap, pricing updates, retry/fallback cost multiplication).
 
+## Security and resilience hardening
+
+* **Threat model** ([`docs/security/threat-model.md`](docs/security/threat-model.md)):
+  22 threats across the 5 trust boundaries plus AI content safety, each with a
+  mitigation, residual risk, and status. The one significant open finding — a caller
+  can claim any `applicationId` in the request body, since IAM proves identity, not a
+  binding to a specific application (ADR-015) — now has a real detective control
+  (`caller_principal_arn` logged on every request) and a scoped, documented design for
+  the preventive fix.
+* **Least-privilege IAM review** ([ADR-022](docs/adr/0022-least-privilege-iam-review.md)):
+  found and fixed a real over-grant — `grant_read_write_data()` had granted
+  `Scan`/`Query`/`BatchWriteItem`/etc. that neither DynamoDB adapter ever calls, now
+  replaced with explicit, minimal per-table action grants, verified by a CDK assertion
+  test.
+* **Cross-Region inference profile resilience**
+  ([ADR-023](docs/adr/0023-cross-region-inference-profile-resilience.md)): evaluated,
+  not adopted by default — including a documented IAM gap (the underlying per-Region
+  foundation-model ARNs aren't currently granted) that would need closing first.
+* **Responsible AI Gateway placement**
+  ([ADR-024](docs/adr/0024-responsible-ai-gateway-placement.md)): recommends
+  integrating Amazon Bedrock Guardrails into the same Bedrock invocation this router
+  already makes, rather than a separate gateway component — grounded in verified facts
+  about Guardrails (no project named exactly "aws-responsible-ai-gateway" exists).
+  Routing remains deterministic and explainable (ADR-007); it provides no content-safety
+  guarantee on its own.
+* **Abuse-case tests** (`tests/unit/handlers/test_abuse_cases.py`): unrecognized-field
+  smuggling has zero effect on routing, raw prompt/response content never appears in
+  logs or persisted audit records, and adversarial decision-ID lookups never 500.
+
+Full guides: [`docs/security/security-architecture.md`](docs/security/security-architecture.md)
+(layer-by-layer walkthrough), [`docs/security/resilience-test-plan.md`](docs/security/resilience-test-plan.md)
+(what's tested vs. deferred to Phase 9), [`docs/operations/incident-response.md`](docs/operations/incident-response.md),
+and [`docs/operations/disaster-recovery.md`](docs/operations/disaster-recovery.md).
+
 ## Try it locally
 
 Evaluate a routing decision without any AWS credentials, using the sample policies and
@@ -255,6 +290,9 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [019](docs/adr/0019-observability-approach.md) | Observability approach — structured logging and EMF custom metrics |
 | [020](docs/adr/0020-model-health-signal-scope.md) | Model health signal — scope and derivation |
 | [021](docs/adr/0021-alerting-design.md) | Alerting design — CloudWatch alarms and a single SNS topic |
+| [022](docs/adr/0022-least-privilege-iam-review.md) | Least-privilege IAM review |
+| [023](docs/adr/0023-cross-region-inference-profile-resilience.md) | Cross-Region inference profile resilience evaluation |
+| [024](docs/adr/0024-responsible-ai-gateway-placement.md) | Responsible AI Gateway placement |
 
 ## Repository structure
 
@@ -264,8 +302,9 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 ├── docs/
 │   ├── adr/                 # Architecture Decision Records
 │   ├── architecture/        # Overview, diagrams, API contracts, domain glossary
-│   ├── operations/          # Deployment/teardown, observability, alarm-response, runbook
-│   ├── security/            # Threat model, security architecture (from Phase 7)
+│   ├── operations/          # Deployment/teardown, observability, alarm-response, runbook,
+│   │                        # incident-response, disaster-recovery
+│   ├── security/            # Threat model, security architecture, resilience test plan
 │   └── cost/                # Cost estimation & pricing-update guide
 ├── events/                  # Sample HTTP-shape request bodies for invoke_lambda_locally.py
 ├── infrastructure/          # AWS CDK v2 (Python) app
@@ -375,8 +414,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) |
 | 4 | Fallback, experimentation, and idempotency |
 | 5 | AWS CDK infrastructure and serverless API |
-| 6 | Observability, auditability, and cost governance *(this phase)* |
-| 7 | Security and resilience hardening |
+| 6 | Observability, auditability, and cost governance |
+| 7 | Security and resilience hardening *(this phase)* |
 | 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |
 | 9 | Performance, load testing, and portfolio polish |
 | 10 | Advanced extensions *(optional, explicit request only)* |
@@ -392,7 +431,9 @@ Development proceeds in explicit, independently-reviewable phases — see
 * No always-on compute, NAT Gateway, or provisioned Bedrock throughput in the base
   deployment ([ADR-005](docs/adr/0005-serverless-pay-per-request-architecture.md)).
 * No claim that estimated cost equals AWS billed cost, and no claim that routing alone
-  provides AI safety/content governance (addressed explicitly in Phase 7).
+  provides AI safety/content governance — see
+  [ADR-024](docs/adr/0024-responsible-ai-gateway-placement.md) for where content-safety
+  is recommended to integrate instead.
 
 ## License
 

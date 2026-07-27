@@ -41,17 +41,31 @@ Out of scope:
 
 ## Security principles this project follows
 
-These are described in full in `docs/adr/` and, from Phase 7 onward, in a dedicated
-threat model and security architecture guide under `docs/security/`. In summary:
+Full detail: [`docs/security/threat-model.md`](docs/security/threat-model.md) (22
+threats across 5 trust boundaries, each with a mitigation and status) and
+[`docs/security/security-architecture.md`](docs/security/security-architecture.md) (a
+layer-by-layer narrative). In summary:
 
 * Clients never supply raw provider model IDs — only logical capabilities/aliases
-  resolved through trusted, server-side configuration (see
+  resolved through trusted, server-side configuration; an unrecognized request field
+  (e.g. an attempted model-ID override) is never read by the request-mapping layer, so
+  it cannot influence routing (see
   [ADR-006](docs/adr/0006-model-aliases-instead-of-client-supplied-model-ids.md)).
-* Least-privilege IAM for every AWS resource; no wildcard Bedrock/DynamoDB permissions.
-* No API keys as a primary identity mechanism; IAM or JWT-based authorization only
-  (decision recorded in Phase 5).
+* Least-privilege IAM for every AWS resource: explicit, minimal DynamoDB action grants
+  and catalogue-scoped Bedrock ARNs — no wildcard resources, reviewed and documented in
+  [ADR-022](docs/adr/0022-least-privilege-iam-review.md).
+* No API keys as a primary identity mechanism — IAM (SigV4) authorization on every
+  business route (see [ADR-015](docs/adr/0015-api-authorization-model.md), which also
+  documents this project's one known open authorization gap: IAM proves identity, not a
+  binding to a specific `applicationId` — see `docs/security/threat-model.md`'s T2 for
+  the detective control in place and the recommended preventive fix).
 * No raw prompts or responses are logged or persisted by default (see
-  [ADR-008](docs/adr/0008-metadata-only-audit-records-by-default.md)).
+  [ADR-008](docs/adr/0008-metadata-only-audit-records-by-default.md)), enforced by a
+  fixed structured-logging attribute whitelist
+  ([ADR-019](docs/adr/0019-observability-approach.md)).
+* Routing alone provides no AI-safety/content-moderation guarantee — see
+  [ADR-024](docs/adr/0024-responsible-ai-gateway-placement.md) for the recommended
+  Bedrock Guardrails integration point (not yet built).
 * All CI/CD deployment uses GitHub OIDC — no long-lived AWS access keys are stored in
   GitHub secrets (Phase 8).
 * Dependencies are pinned and scanned for known vulnerabilities in CI (Phase 8).

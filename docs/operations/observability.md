@@ -27,6 +27,7 @@ Every log line the Lambda emits is one JSON object
 | `latency_ms` | Attempt-level logs | Invocation latency |
 | `status_code` | Every completed request | HTTP status returned |
 | `http_method` / `resource` | Every completed request | Which route was called |
+| `caller_principal_arn` | Every completed request | The authenticated IAM principal's ARN (`"none"` for `/health`/`/ready`) — a detective control for `applicationId` spoofing (threat model T2, ADR-015): correlate this against the request's claimed `applicationId` if abuse is suspected |
 
 This is the **complete, fixed list** (`_ALLOWED_EXTRA_KEYS` in
 `structured_logging.py`) — any `extra={...}` key not on it is silently dropped by the

@@ -28,6 +28,7 @@ _ALLOWED_EXTRA_KEYS: Final = frozenset(
         "status_code",
         "http_method",
         "resource",
+        "caller_principal_arn",
     }
 )
 

@@ -13,6 +13,8 @@ Operational runbooks and alarm-response guides.
 * [`runbook.md`](runbook.md) — routine operational tasks: health checks, looking up a
   decision, updating policy/catalogue, adjusting Lambda/alarm configuration, subscribing
   to alarm notifications (Phase 6).
-
-Incident-response and disaster-recovery guides are populated in Phase 7, once the
-security/resilience hardening phase defines the threat model they respond to.
+* [`incident-response.md`](incident-response.md) — responding to a suspected security
+  incident (cross-application data exposure, data leakage, credential compromise,
+  cost abuse) — see `docs/security/threat-model.md` for what's anticipated (Phase 7).
+* [`disaster-recovery.md`](disaster-recovery.md) — recovering from full stack loss, a
+  Region-wide Bedrock incident, DynamoDB data loss, or a stuck CDK deployment (Phase 7).

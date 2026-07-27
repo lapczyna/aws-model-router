@@ -109,8 +109,17 @@ class LambdaConstruct(Construct):
             tracing=lambda_.Tracing.ACTIVE,
         )
 
-        decisions_table.grant_read_write_data(self.function)
-        idempotency_table.grant_read_write_data(self.function)
+        # Explicit, minimal action grants (ADR-022) rather than `grant_read_write_data()`
+        # — that helper grants Scan/Query/BatchGetItem/BatchWriteItem/
+        # ConditionCheckItem/UpdateItem/DescribeTable/GetRecords/GetShardIterator, none
+        # of which either adapter actually calls
+        # (`adapters/dynamodb/dynamodb_decision_repository.py`,
+        # `dynamodb_idempotency_store.py`: only GetItem/PutItem/DeleteItem, verified by
+        # reading both adapters' actual boto3 calls).
+        decisions_table.grant(self.function, "dynamodb:GetItem", "dynamodb:PutItem")
+        idempotency_table.grant(
+            self.function, "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"
+        )
 
         bedrock_resource_arns = _load_bedrock_resource_arns(
             repo_root, region=stack.region, account_id=stack.account

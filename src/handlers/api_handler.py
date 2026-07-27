@@ -141,6 +141,16 @@ def _request_id(event: dict[str, Any]) -> str:
     return str(event.get("requestContext", {}).get("requestId", "unknown"))
 
 
+def _caller_principal_arn(event: dict[str, Any]) -> str:
+    """The authenticated IAM principal's ARN for this request (`/health`/`/ready` have
+    none — `AuthorizationType.NONE`). Logged (never enforced — see ADR-015/threat model
+    T2) so a claimed `applicationId` that doesn't belong to the calling principal is at
+    least auditable via Logs Insights, even though it isn't blocked in real time.
+    """
+    identity = event.get("requestContext", {}).get("identity", {}) or {}
+    return str(identity.get("userArn") or "none")
+
+
 def _parse_body_or_400(
     event: dict[str, Any], request_id: str
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -312,6 +322,7 @@ def dispatch(event: dict[str, Any], services: HandlerServices) -> dict[str, Any]
         "request_id": request_id,
         "http_method": method,
         "resource": resource,
+        "caller_principal_arn": _caller_principal_arn(event),
     }
 
     try:
