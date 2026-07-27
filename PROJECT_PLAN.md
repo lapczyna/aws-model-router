@@ -236,7 +236,7 @@ observed invocation outcomes — first becomes available here (ADR-020).
 - [x] Runbook, alarm-response guide, observability guide, cost guide written
       (`docs/operations/runbook.md`, `docs/operations/alarm-response.md`,
       `docs/operations/observability.md`, `docs/cost/cost-estimation-guide.md`)
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 ### Phase 7 — Security and resilience hardening
 Threat model covering the full listed threat surface. Controls implemented/documented for
@@ -309,7 +309,7 @@ traffic unvalidated.
 | Phase 3 — Bedrock provider adapter | Complete | `929ce7a` |
 | Phase 4 — Fallback, experimentation, and idempotency | Complete | `324fe75` |
 | Phase 5 — AWS CDK infrastructure and serverless API | Complete | `0b88448` |
-| Phase 6 — Observability, auditability, and cost governance | Complete | *pending — filled in after commit/push* |
+| Phase 6 — Observability, auditability, and cost governance | Complete | `e2a6cd3` |
 
 ## Remaining milestones
 
