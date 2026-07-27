@@ -104,6 +104,7 @@ include = '\.pyi?$'
 python_version = "3.12"
 mypy_path = ["src", "infrastructure"]
 files = ["src", "tests", "infrastructure"]
+exclude = ["infrastructure/cdk\\.out/", "infrastructure/\\.cdk\\.staging/"]
 strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true

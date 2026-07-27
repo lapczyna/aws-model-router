@@ -212,12 +212,30 @@ fallback rate, no-eligible-model, throttling, estimated-spend guidance), operati
 runbook, alarm-response guide, observability guide, cost-estimation guide. Application
 inference profiles used where practical for cost attribution. Explicit documentation of
 estimate-vs-billing gap, pricing update process, retry/fallback cost multiplication.
+Also: the model health signal (`ModelHealth`/`MODEL_UNHEALTHY`, modeled since Phase 2 but
+unwired) is finally wired into candidate filtering, since a real signal — derived from
+observed invocation outcomes — first becomes available here (ADR-020).
 
 **DoD:**
-- [ ] All listed metrics published with only approved dimensions
-- [ ] No request/decision/user/conversation ID used as a metric dimension (verified)
-- [ ] Dashboard + all listed alarms deployed
-- [ ] Runbook, alarm-response guide, observability guide, cost guide written
+- [x] All listed metrics published with only approved dimensions — `EmfMetricsPublisher`
+      (`src/adapters/metrics/emf_metrics_publisher.py`, ADR-019): `RequestCount`,
+      `FallbackUsedCount`, `NoEligibleModelCount`, `EstimatedCostUsd`,
+      `InvocationAttemptCount`, `InvocationLatencyMs`, `ProviderFailureCount` — every one
+      dimensioned by `Environment` only
+- [x] No request/decision/user/conversation ID used as a metric dimension (verified) —
+      `EmfMetricsPublisher._put_metric` raises `ValueError` on any property outside its
+      fixed whitelist (`_ALLOWED_EXTRA_KEYS`), exercised by
+      `tests/unit/adapters/metrics/test_emf_metrics_publisher.py::test_put_metric_rejects_disallowed_extra_key`
+- [x] Dashboard + all listed alarms deployed — `ObservabilityConstruct`
+      (`infrastructure/cdk_constructs/observability_construct.py`, ADR-021): 7 alarms
+      (`LambdaErrorsAlarm`, `LambdaThrottlesAlarm`, `Api5xxAlarm`, `ProviderFailureAlarm`,
+      `FallbackRateAlarm`, `NoEligibleModelAlarm`, `EstimatedDailySpendAlarm`) + 1
+      dashboard + 1 SNS topic, verified against the real synthesized template
+      (`tests/infra/test_observability_construct.py`, 14 tests) — zero new IAM
+      permissions on the Lambda's execution role
+- [x] Runbook, alarm-response guide, observability guide, cost guide written
+      (`docs/operations/runbook.md`, `docs/operations/alarm-response.md`,
+      `docs/operations/observability.md`, `docs/cost/cost-estimation-guide.md`)
 - [ ] Committed and pushed
 
 ### Phase 7 — Security and resilience hardening
@@ -291,12 +309,12 @@ traffic unvalidated.
 | Phase 3 — Bedrock provider adapter | Complete | `929ce7a` |
 | Phase 4 — Fallback, experimentation, and idempotency | Complete | `324fe75` |
 | Phase 5 — AWS CDK infrastructure and serverless API | Complete | `0b88448` |
+| Phase 6 — Observability, auditability, and cost governance | Complete | *pending — filled in after commit/push* |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 6 | Observability, auditability, and cost governance |
 | 7 | Security and resilience hardening |
 | 8 | CI/CD with GitHub Actions |
 | 9 | Performance, load testing, and portfolio polish |
@@ -322,18 +340,17 @@ incorrect:
   (`docs/architecture/api-contracts.md`) is a separate, external representation that a
   Lambda handler will translate to/from starting in Phase 5 — the two are not expected
   to share field names verbatim.
-* **Deferred protocols**: `ModelProvider`/`ProviderRequest`/`ProviderResponse` were added
-  in Phase 3; `IdempotencyStore` and `RoutingDecisionRepository` were added in Phase 4,
-  as planned. `ModelHealthRepository` and `MetricsPublisher` remain deferred to
-  Phase 6, alongside their first real implementation and consumer.
-* **Health filtering**: model health (`ModelHealth`/`MODEL_UNHEALTHY`) is modeled in the
-  catalogue schema (Phase 2) but still not wired into candidate filtering — Phase 4's
-  explicit scope (fallback, experimentation, idempotency) did not include it, and no
-  `ModelHealthRepository` exists yet to source a live signal from. This is now correctly
-  deferred to Phase 6 (observability), where a real health signal — derived from
-  invocation outcomes recorded as `InvocationAttempt`s — first becomes available to
-  filter on. (An earlier note in this file said "Phase 4 scope"; corrected here now that
-  Phase 4 is complete and didn't include it.)
+* **Deferred protocols, now all implemented**: `ModelProvider`/`ProviderRequest`/
+  `ProviderResponse` were added in Phase 3; `IdempotencyStore` and
+  `RoutingDecisionRepository` in Phase 4; `ModelHealthRepository` and `MetricsPublisher`
+  in Phase 6 (ADR-020, ADR-019) — each alongside its first real implementation and
+  consumer, as planned throughout.
+* **Health filtering**: model health (`ModelHealth`/`MODEL_UNHEALTHY`) was modeled in the
+  catalogue schema since Phase 2 but stayed unwired through Phases 3–5 (no
+  `ModelHealthRepository` existed yet to source a live signal from). Phase 6 wired it up:
+  a consecutive-failure-derived signal (`InMemoryModelHealthRepository`, ADR-020) now
+  excludes `UNAVAILABLE` candidates (`MODEL_UNHEALTHY`) and flags `DEGRADED` ones
+  informationally (`MODEL_DEGRADED`) in `domain/filtering.py`.
 * **Provider error taxonomy is category-based, not exception-subtype-based** (Phase 3):
   a single `domain.errors.ProviderError` carries a `category` attribute
   (`ProviderErrorCategory`: `THROTTLED`/`TRANSIENT`/`TIMEOUT`/`PERMANENT`) rather than a
@@ -410,3 +427,31 @@ incorrect:
   Phase 4 — 55 new: domain/adapter additions, DynamoDB adapters via moto, and the full
   Lambda handler layer), plus 24 opt-in CDK assertion tests (`pytest -m infra`) not
   counted in that default total.
+* **`ModelHealthRepository` is in-memory-only, deliberately, not DynamoDB-backed**
+  (ADR-020): unlike `IdempotencyStore`/`RoutingDecisionRepository` (Phase 4 in-memory →
+  Phase 5 DynamoDB), health tracking's in-memory reference implementation is not
+  scheduled for a fleet-wide upgrade absent a demonstrated need — an occasionally-missed
+  degradation signal is a soft quality gap, not a correctness bug, unlike idempotency.
+* **`MODEL_DEGRADED` added to the reason-code vocabulary** (ADR-007's "only added to,
+  never renamed/repurposed" rule) — informational only (a degraded model stays eligible,
+  `MODEL_UNHEALTHY`/`UNAVAILABLE` is what excludes a candidate).
+* **Every custom metric declares exactly one CloudWatch dimension — `Environment`**
+  (ADR-019), even though capability/model-alias/status/application-ID ride along as
+  plain, non-dimension properties in the same EMF JSON line. Dimensioning by e.g.
+  `ModelAlias` would fragment a metric into one time series per model, unreferenceable by
+  a CDK-defined alarm without hardcoding the catalogue's contents into infrastructure
+  code. Per-model/per-capability breakdowns go through CloudWatch Logs Insights instead
+  (`docs/operations/observability.md`).
+* **"Throttling" alarms on Lambda concurrency (`metric_throttles`), not an API Gateway
+  usage-plan metric** (ADR-021) — API Gateway REST APIs publish no dedicated
+  throttle-count metric analogous to Lambda's, whereas Lambda throttling ties directly
+  to the existing `lambda_reserved_concurrency` config knob.
+* **No SNS subscription is created by CDK** (ADR-021) — the alarm topic exists and every
+  alarm is wired to it, but no real notification endpoint was ever specified, and
+  fabricating one (fake or real-but-unauthorized) was rejected. An operator subscribes
+  post-deploy (`docs/operations/runbook.md`).
+* **Test count after Phase 6**: 303 tests in the default `pytest` run (up from 272 after
+  Phase 5 — 31 new: health-based filtering, `InMemoryModelHealthRepository`,
+  `EmfMetricsPublisher`, structured-logging formatter, and orchestrator/route-service
+  wiring), plus 38 opt-in CDK assertion tests (`pytest -m infra`, up from 24 — 14 new for
+  `ObservabilityConstruct`).

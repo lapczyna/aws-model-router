@@ -16,7 +16,7 @@ from adapters.memory.in_memory_idempotency_store import InMemoryIdempotencyStore
 from application.invocation_orchestrator import InvocationOrchestrator
 from application.route_evaluation_service import RouteEvaluationService
 from domain.cost_estimation import DefaultCostEstimator, DefaultTokenEstimator
-from domain.enums import ProviderErrorCategory, ProviderName, Role, StopReason
+from domain.enums import ModelHealthStatus, ProviderErrorCategory, ProviderName, Role, StopReason
 from domain.errors import IdempotencyConflictError, IdempotencyInProgressError, ProviderError
 from domain.fallback import FallbackPolicy
 from domain.invocation import InvocationAttemptStatus
@@ -106,6 +106,8 @@ def _build_orchestrator(
     idempotency_store: Any = None,
     clock: Any = None,
     decision_repository: Any = None,
+    model_health_repository: Any = None,
+    metrics_publisher: Any = None,
 ) -> InvocationOrchestrator:
     effective_clock = clock or FixedClock(FIXED_NOW)
     route_service = RouteEvaluationService(
@@ -115,6 +117,7 @@ def _build_orchestrator(
         cost_estimator=DefaultCostEstimator(),
         clock=effective_clock,
         identifier_generator=SequentialIdentifierGenerator(),
+        model_health_repository=model_health_repository,
     )
     return InvocationOrchestrator(
         route_evaluation_service=route_service,
@@ -124,6 +127,8 @@ def _build_orchestrator(
         identifier_generator=SequentialIdentifierGenerator(),
         idempotency_store=idempotency_store,
         decision_repository=decision_repository,
+        model_health_repository=model_health_repository,
+        metrics_publisher=metrics_publisher,
         monotonic=lambda: 0.0,
     )
 
@@ -583,3 +588,89 @@ def test_result_is_persisted_when_a_decision_repository_is_configured() -> None:
     assert stored is not None
     assert stored.decision == result.decision
     assert stored.invocation_attempts == result.invocation_attempts
+
+
+class _RecordingHealthRepository:
+    def __init__(self) -> None:
+        self.outcomes: list[tuple[str, InvocationAttemptStatus]] = []
+
+    def get_health(self, model_alias: str) -> ModelHealthStatus:
+        return ModelHealthStatus.HEALTHY
+
+    def record_outcome(self, model_alias: str, status: InvocationAttemptStatus) -> None:
+        self.outcomes.append((model_alias, status))
+
+
+class _RecordingMetricsPublisher:
+    def __init__(self) -> None:
+        self.published: list[Any] = []
+
+    def publish(self, result: Any) -> None:
+        self.published.append(result)
+
+
+def test_health_outcome_recorded_for_each_invocation_attempt() -> None:
+    primary = make_model("primary", capability_tags=("balanced-text",))
+    fallback = make_model("fallback", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_model_aliases=("primary", "fallback"),
+        preferred_model_alias="primary",
+        fallback_policy=FallbackPolicy(fallback_model_aliases=("fallback",), maximum_attempts=2),
+    )
+    provider = FakeModelProvider(
+        {
+            "primary": [ProviderError("throttled", category=ProviderErrorCategory.THROTTLED)],
+            "fallback": [_response("fallback")],
+        }
+    )
+    health_repository = _RecordingHealthRepository()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([primary, fallback]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        model_health_repository=health_repository,
+    )
+
+    orchestrator.invoke(_request())
+
+    assert health_repository.outcomes == [
+        ("primary", InvocationAttemptStatus.THROTTLED),
+        ("fallback", InvocationAttemptStatus.SUCCEEDED),
+    ]
+
+
+def test_metrics_published_once_per_completed_invocation() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    provider = FakeModelProvider({"model-a": [_response("model-a")]})
+    metrics_publisher = _RecordingMetricsPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        metrics_publisher=metrics_publisher,
+    )
+
+    result = orchestrator.invoke(_request())
+
+    assert len(metrics_publisher.published) == 1
+    assert metrics_publisher.published[0] is result
+
+
+def test_metrics_published_even_when_no_eligible_model() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_capabilities=("economical-text",), allowed_model_aliases=("model-a",)
+    )
+    metrics_publisher = _RecordingMetricsPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        FakeModelProvider({}),
+        metrics_publisher=metrics_publisher,
+    )
+
+    orchestrator.invoke(_request())
+
+    assert len(metrics_publisher.published) == 1
+    assert metrics_publisher.published[0].decision.selected_model_alias is None

@@ -5,8 +5,9 @@ from Phase 5 — ADR-010). The domain and application layers only ever depend on
 protocols defined here, never on a concrete adapter (ADR-002).
 
 Only the protocols with a real caller and implementation are defined here.
-`ModelHealthRepository` and `MetricsPublisher` (Phase 6) are introduced alongside their
-first real implementation and consumer, not speculatively ahead of them.
+`ModelHealthRepository` and `MetricsPublisher` were introduced in Phase 6 alongside
+their first real implementation and consumer, not speculatively ahead of them
+(ADR-020, ADR-019).
 """
 
 from collections.abc import Sequence
@@ -14,8 +15,9 @@ from datetime import datetime
 from typing import Protocol
 
 from domain.catalogue import ModelDefinition, ModelPricing
+from domain.enums import ModelHealthStatus
 from domain.idempotency import IdempotencyReservation
-from domain.invocation import AuditRecord, InferenceResult
+from domain.invocation import AuditRecord, InferenceResult, InvocationAttemptStatus
 from domain.messages import Message
 from domain.policy import RoutingPolicy
 from domain.provider import ProviderRequest, ProviderResponse
@@ -113,3 +115,30 @@ class RoutingDecisionRepository(Protocol):
     def save(self, audit_record: AuditRecord) -> None: ...
 
     def get(self, decision_id: str) -> AuditRecord | None: ...
+
+
+class ModelHealthRepository(Protocol):
+    """Tracks a model's operational health, sourced from observed invocation outcomes
+    (ADR-020) — never predictive modeling. Consulted during candidate filtering
+    (`domain.filtering`) and updated by `InvocationOrchestrator` after every invocation
+    attempt.
+    """
+
+    def get_health(self, model_alias: str) -> ModelHealthStatus: ...
+
+    def record_outcome(self, model_alias: str, status: InvocationAttemptStatus) -> None: ...
+
+
+class MetricsPublisher(Protocol):
+    """Publishes operational metrics for one completed `POST /v1/inference` call
+    (ADR-019). Takes the whole `InferenceResult` rather than individual fields so the
+    publisher — not every caller — decides which metrics/dimensions to derive from it.
+
+    Implementations must never use `decision_id`, `conversation_id`, `request_id`, or any
+    end-user identifier as a metric *dimension* (`docs/requirements.md` NFR-4.2) — only
+    bounded, low-cardinality values (capability, model alias, provider, and
+    `application_id` — a small, registered set, not a per-request identifier) are safe
+    dimensions.
+    """
+
+    def publish(self, result: InferenceResult) -> None: ...

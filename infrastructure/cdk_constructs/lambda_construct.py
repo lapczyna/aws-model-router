@@ -104,6 +104,7 @@ class LambdaConstruct(Construct):
                 "IDEMPOTENCY_TABLE_NAME": idempotency_table.table_name,
                 "MAX_REQUEST_BODY_BYTES": str(environment_config.max_request_body_bytes),
                 "LOG_LEVEL": "INFO",
+                "ENVIRONMENT_NAME": environment_config.env_name,
             },
             tracing=lambda_.Tracing.ACTIVE,
         )

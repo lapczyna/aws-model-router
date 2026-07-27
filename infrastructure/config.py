@@ -30,6 +30,16 @@ class EnvironmentConfig:
     decisions_retention_seconds: int
     idempotency_stale_reservation_seconds: int
     max_request_body_bytes: int
+    # Alarm thresholds (Phase 6, ADR-021) — evaluated over a 5-minute period unless
+    # noted. "Guidance" thresholds (estimated spend) are advisory, not hard limits: the
+    # underlying metric is itself an estimate, never billed cost (ADR-005).
+    lambda_error_alarm_threshold: int
+    lambda_throttle_alarm_threshold: int
+    api_5xx_alarm_threshold: int
+    provider_failure_alarm_threshold: int
+    fallback_rate_alarm_threshold_percent: float
+    no_eligible_model_alarm_threshold: int
+    estimated_daily_spend_alarm_threshold_usd: float
 
 
 _ENVIRONMENTS: dict[str, EnvironmentConfig] = {
@@ -46,6 +56,13 @@ _ENVIRONMENTS: dict[str, EnvironmentConfig] = {
         decisions_retention_seconds=7 * 24 * 60 * 60,
         idempotency_stale_reservation_seconds=300,
         max_request_body_bytes=256 * 1024,
+        lambda_error_alarm_threshold=5,
+        lambda_throttle_alarm_threshold=5,
+        api_5xx_alarm_threshold=5,
+        provider_failure_alarm_threshold=5,
+        fallback_rate_alarm_threshold_percent=50.0,
+        no_eligible_model_alarm_threshold=5,
+        estimated_daily_spend_alarm_threshold_usd=5.0,
     ),
     "prod": EnvironmentConfig(
         env_name="prod",
@@ -60,6 +77,13 @@ _ENVIRONMENTS: dict[str, EnvironmentConfig] = {
         decisions_retention_seconds=30 * 24 * 60 * 60,
         idempotency_stale_reservation_seconds=300,
         max_request_body_bytes=256 * 1024,
+        lambda_error_alarm_threshold=10,
+        lambda_throttle_alarm_threshold=10,
+        api_5xx_alarm_threshold=10,
+        provider_failure_alarm_threshold=10,
+        fallback_rate_alarm_threshold_percent=25.0,
+        no_eligible_model_alarm_threshold=10,
+        estimated_daily_spend_alarm_threshold_usd=100.0,
     ),
 }
 

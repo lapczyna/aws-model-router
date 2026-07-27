@@ -29,6 +29,8 @@ from domain.ports import (
     Clock,
     IdempotencyStore,
     IdentifierGenerator,
+    MetricsPublisher,
+    ModelHealthRepository,
     ModelProvider,
     RoutingDecisionRepository,
     RoutingPolicyRepository,
@@ -49,6 +51,8 @@ class InvocationOrchestrator:
         identifier_generator: IdentifierGenerator,
         idempotency_store: IdempotencyStore | None = None,
         decision_repository: RoutingDecisionRepository | None = None,
+        model_health_repository: ModelHealthRepository | None = None,
+        metrics_publisher: MetricsPublisher | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._route_evaluation_service = route_evaluation_service
@@ -58,6 +62,8 @@ class InvocationOrchestrator:
         self._identifier_generator = identifier_generator
         self._idempotency_store = idempotency_store
         self._decision_repository = decision_repository
+        self._model_health_repository = model_health_repository
+        self._metrics_publisher = metrics_publisher
         self._monotonic = monotonic
 
     def invoke(self, request: InferenceRequest) -> InferenceResult:
@@ -118,6 +124,7 @@ class InvocationOrchestrator:
         if decision.selected_model_alias is None:
             result = InferenceResult(decision=decision, response=None, invocation_attempts=())
             self._persist(result)
+            self._publish_metrics(result)
             return result
 
         policy = self._policy_repository.resolve(request.application_id)
@@ -142,13 +149,13 @@ class InvocationOrchestrator:
                 response = self._model_provider.invoke(provider_request)
             except ProviderError as exc:
                 latency_ms = int((self._monotonic() - started_at) * 1000)
+                status = status_for_provider_error_category(exc.category)
                 attempts.append(
                     InvocationAttempt(
-                        model_alias=candidate_alias,
-                        status=status_for_provider_error_category(exc.category),
-                        latency_ms=latency_ms,
+                        model_alias=candidate_alias, status=status, latency_ms=latency_ms
                     )
                 )
+                self._record_health_outcome(candidate_alias, status)
                 extra_code = reason_code_for_provider_error_category(exc.category)
                 if extra_code is not None:
                     extra_reason_codes.append(extra_code)
@@ -164,6 +171,7 @@ class InvocationOrchestrator:
                         latency_ms=latency_ms,
                     )
                 )
+                self._record_health_outcome(candidate_alias, InvocationAttemptStatus.SUCCEEDED)
                 succeeded_alias = candidate_alias
                 if candidate_alias != decision.selected_model_alias:
                     extra_reason_codes.append(RoutingReasonCode.FALLBACK_SELECTED)
@@ -176,7 +184,16 @@ class InvocationOrchestrator:
             invocation_attempts=tuple(attempts),
         )
         self._persist(result)
+        self._publish_metrics(result)
         return result
+
+    def _record_health_outcome(self, model_alias: str, status: InvocationAttemptStatus) -> None:
+        if self._model_health_repository is not None:
+            self._model_health_repository.record_outcome(model_alias, status)
+
+    def _publish_metrics(self, result: InferenceResult) -> None:
+        if self._metrics_publisher is not None:
+            self._metrics_publisher.publish(result)
 
     @staticmethod
     def _build_candidate_chain(

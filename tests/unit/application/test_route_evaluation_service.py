@@ -4,7 +4,7 @@ import pytest
 
 from application.route_evaluation_service import RouteEvaluationService
 from domain.cost_estimation import DefaultCostEstimator, DefaultTokenEstimator
-from domain.enums import QualityTier, Role
+from domain.enums import ModelHealthStatus, QualityTier, Role
 from domain.errors import ConfigurationError, RoutingPolicyNotFoundError
 from domain.messages import Message
 from domain.reason_codes import RoutingReasonCode
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 FIXED_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def _service(catalogue, policy_repository) -> RouteEvaluationService:
+def _service(catalogue, policy_repository, model_health_repository=None) -> RouteEvaluationService:
     return RouteEvaluationService(
         policy_repository=policy_repository,
         model_catalogue=catalogue,
@@ -32,6 +32,7 @@ def _service(catalogue, policy_repository) -> RouteEvaluationService:
         cost_estimator=DefaultCostEstimator(),
         clock=FixedClock(FIXED_NOW),
         identifier_generator=SequentialIdentifierGenerator(),
+        model_health_repository=model_health_repository,
     )
 
 
@@ -334,6 +335,32 @@ def test_reason_codes_are_returned_in_stable_canonical_order() -> None:
     assert list(decision.reason_codes) == sorted(
         decision.reason_codes, key=lambda code: canonical_index[code]
     )
+
+
+class _FixedHealthRepository:
+    def __init__(self, health_by_alias: dict[str, ModelHealthStatus]) -> None:
+        self._health_by_alias = health_by_alias
+
+    def get_health(self, model_alias: str) -> ModelHealthStatus:
+        return self._health_by_alias.get(model_alias, ModelHealthStatus.HEALTHY)
+
+    def record_outcome(self, model_alias: str, status: object) -> None:
+        raise AssertionError("not used by RouteEvaluationService.evaluate")
+
+
+def test_unavailable_model_health_excludes_it_from_selection() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    service = _service(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        model_health_repository=_FixedHealthRepository({"model-a": ModelHealthStatus.UNAVAILABLE}),
+    )
+
+    decision = service.evaluate(_request())
+
+    assert decision.selected_model_alias is None
+    assert RoutingReasonCode.MODEL_UNHEALTHY in decision.considered_candidates[0].reason_codes
 
 
 def test_repeated_evaluation_is_deterministic() -> None:

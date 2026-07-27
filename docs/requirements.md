@@ -122,7 +122,9 @@ NFR-1.2. No EC2, ECS, EKS, OpenSearch, Aurora, ElastiCache, NAT Gateway, or prov
 Bedrock throughput is used in the base architecture.
 
 NFR-1.3. All cost figures produced by the router (estimated cost) are explicitly labeled
-as estimates and are never presented as equivalent to AWS billing.
+as estimates and are never presented as equivalent to AWS billing — see
+[`docs/cost/cost-estimation-guide.md`](cost/cost-estimation-guide.md) for the full
+estimate-vs-billing gap explanation.
 
 ### NFR-2 — Security
 
@@ -149,10 +151,14 @@ clear, typed error (`NO_ELIGIBLE_MODEL`) rather than an ambiguous failure.
 
 ### NFR-4 — Observability
 
-NFR-4.1. All logs are structured JSON with a fixed, documented set of safe attributes.
+NFR-4.1. All logs are structured JSON with a fixed, documented set of safe attributes —
+`src/shared/structured_logging.py`'s `JsonFormatter`; the fixed attribute list is
+documented in `docs/operations/observability.md` (ADR-019).
 
 NFR-4.2. Metrics use low-cardinality dimensions only; request/decision/user/conversation
-IDs are never used as metric dimensions.
+IDs are never used as metric dimensions — every custom metric declares exactly one
+CloudWatch dimension (`Environment`), enforced by `EmfMetricsPublisher._put_metric`
+raising on any other property (ADR-019; `docs/operations/observability.md`).
 
 ### NFR-5 — Testability
 

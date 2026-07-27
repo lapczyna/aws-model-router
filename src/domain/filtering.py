@@ -13,9 +13,10 @@ from collections.abc import Sequence
 
 from domain.candidates import RouteCandidate
 from domain.catalogue import ModelDefinition
+from domain.enums import ModelHealthStatus
 from domain.messages import Message
 from domain.policy import RoutingPolicy
-from domain.ports import CostEstimator, TokenEstimator
+from domain.ports import CostEstimator, ModelHealthRepository, TokenEstimator
 from domain.reason_codes import RoutingReasonCode, sort_reason_codes
 from domain.requirements import EffectiveRoutingRequirements
 
@@ -27,9 +28,19 @@ def evaluate_candidate(
     token_estimator: TokenEstimator,
     cost_estimator: CostEstimator,
     messages: Sequence[Message],
+    health_status: ModelHealthStatus = ModelHealthStatus.HEALTHY,
 ) -> RouteCandidate:
     reason_codes: list[RoutingReasonCode] = []
     eligible = True
+
+    if health_status is ModelHealthStatus.UNAVAILABLE:
+        reason_codes.append(RoutingReasonCode.MODEL_UNHEALTHY)
+        eligible = False
+    elif health_status is ModelHealthStatus.DEGRADED:
+        # Informational only (ADR-020): a degraded model stays eligible — there is no
+        # healthier alternative signal here beyond "this model has recently had trouble"
+        # — but the decision's reason codes surface it for audit/dashboard visibility.
+        reason_codes.append(RoutingReasonCode.MODEL_DEGRADED)
 
     capability_matched = (
         requirements.capability in model.capabilities.capability_tags
@@ -87,8 +98,21 @@ def build_route_candidates(
     token_estimator: TokenEstimator,
     cost_estimator: CostEstimator,
     messages: Sequence[Message],
+    model_health_repository: ModelHealthRepository | None = None,
 ) -> list[RouteCandidate]:
     return [
-        evaluate_candidate(model, requirements, policy, token_estimator, cost_estimator, messages)
+        evaluate_candidate(
+            model,
+            requirements,
+            policy,
+            token_estimator,
+            cost_estimator,
+            messages,
+            health_status=(
+                model_health_repository.get_health(model.model_alias)
+                if model_health_repository is not None
+                else ModelHealthStatus.HEALTHY
+            ),
+        )
         for model in models
     ]

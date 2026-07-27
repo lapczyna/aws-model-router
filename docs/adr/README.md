@@ -61,6 +61,9 @@ What else was evaluated, and why was it not chosen?
 | [ADR-016](0016-single-shared-lambda-handler.md) | Single shared Lambda handler | Accepted |
 | [ADR-017](0017-lambda-packaging-without-experimental-cdk-constructs.md) | Lambda packaging without experimental CDK constructs | Accepted |
 | [ADR-018](0018-dynamodb-decision-and-idempotency-store-design.md) | DynamoDB decision and idempotency store design | Accepted |
+| [ADR-019](0019-observability-approach.md) | Observability approach — structured logging and EMF custom metrics | Accepted |
+| [ADR-020](0020-model-health-signal-scope.md) | Model health signal — scope and derivation | Accepted |
+| [ADR-021](0021-alerting-design.md) | Alerting design — CloudWatch alarms and a single SNS topic | Accepted |
 
 Future ADRs (cross-Region resilience, Responsible AI Gateway placement) are added in the
 phase where those decisions are made (Phase 7 — see `PROJECT_PLAN.md`).

@@ -28,6 +28,8 @@ from adapters.config.local_model_catalogue import LocalFileModelCatalogue
 from adapters.config.local_policy_repository import LocalFileRoutingPolicyRepository
 from adapters.dynamodb.dynamodb_decision_repository import DynamoDbRoutingDecisionRepository
 from adapters.dynamodb.dynamodb_idempotency_store import DynamoDbIdempotencyStore
+from adapters.memory.in_memory_model_health_repository import InMemoryModelHealthRepository
+from adapters.metrics.emf_metrics_publisher import EmfMetricsPublisher
 from application.invocation_orchestrator import InvocationOrchestrator
 from application.route_evaluation_service import RouteEvaluationService
 from domain.cost_estimation import DefaultCostEstimator, DefaultTokenEstimator
@@ -47,9 +49,9 @@ from handlers.request_mapping import (
 )
 from shared.clock import SystemClock
 from shared.identifiers import Uuid4IdentifierGenerator
+from shared.structured_logging import configure_logging
 
 logger = logging.getLogger()
-logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _MAX_REQUEST_BODY_BYTES = int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(256 * 1024)))
 
@@ -69,6 +71,7 @@ def build_services() -> HandlerServices:
     """
     policies_dir = Path(os.environ.get("POLICIES_DIR", "policies"))
     region = os.environ.get("AWS_REGION", "us-east-1")
+    environment = os.environ.get("ENVIRONMENT_NAME", "dev")
 
     catalogue = LocalFileModelCatalogue(policies_dir / "model_catalogue.yaml")
     policy_repository = LocalFileRoutingPolicyRepository(
@@ -77,6 +80,7 @@ def build_services() -> HandlerServices:
     )
     clock = SystemClock()
     identifier_generator = Uuid4IdentifierGenerator()
+    model_health_repository = InMemoryModelHealthRepository()
 
     route_service = RouteEvaluationService(
         policy_repository=policy_repository,
@@ -85,6 +89,7 @@ def build_services() -> HandlerServices:
         cost_estimator=DefaultCostEstimator(),
         clock=clock,
         identifier_generator=identifier_generator,
+        model_health_repository=model_health_repository,
     )
 
     bedrock_client = boto3.client("bedrock-runtime", region_name=region)
@@ -106,6 +111,8 @@ def build_services() -> HandlerServices:
         identifier_generator=identifier_generator,
         idempotency_store=idempotency_store,
         decision_repository=decision_repository,
+        model_health_repository=model_health_repository,
+        metrics_publisher=EmfMetricsPublisher(environment=environment),
     )
     return HandlerServices(
         catalogue=catalogue,
@@ -149,7 +156,11 @@ def _parse_body_or_400(
     try:
         return parse_json_body(raw_body), None
     except (json.JSONDecodeError, TypeError) as exc:
-        logger.info("Malformed request body request_id=%s error=%s", request_id, exc)
+        logger.info(
+            "Malformed request body: %s",
+            exc,
+            extra={"request_id": request_id, "error_code": "INVALID_REQUEST"},
+        )
         return None, _respond(
             400,
             error_response_body(request_id, "INVALID_REQUEST", "Request body is not valid JSON."),
@@ -180,7 +191,11 @@ def handle_inference(
     try:
         request = parse_inference_request(body)
     except (ValidationError, KeyError, TypeError, ValueError) as exc:
-        logger.info("Invalid inference request request_id=%s error=%s", request_id, exc)
+        logger.info(
+            "Invalid inference request: %s",
+            exc,
+            extra={"request_id": request_id, "error_code": "INVALID_REQUEST"},
+        )
         return _respond(
             400, error_response_body(request_id, "INVALID_REQUEST", "Request failed validation.")
         )
@@ -188,8 +203,17 @@ def handle_inference(
     try:
         result = services.orchestrator.invoke(request)
     except Exception as exc:
-        logger.exception("Inference invocation failed request_id=%s", request_id)
         status, error_body = map_exception_to_status_and_body(exc, request_id)
+        logger.exception(
+            "Inference invocation failed",
+            extra={
+                "request_id": request_id,
+                "application_id": request.application_id,
+                "capability": request.requirements.capability,
+                "error_code": error_body["errorCode"],
+                "status_code": status,
+            },
+        )
         return _respond(status, error_body)
 
     if result.decision.selected_model_alias is None:
@@ -214,7 +238,11 @@ def handle_routes_evaluate(
     try:
         request = parse_inference_request(body)
     except (ValidationError, KeyError, TypeError, ValueError) as exc:
-        logger.info("Invalid route-evaluation request request_id=%s error=%s", request_id, exc)
+        logger.info(
+            "Invalid route-evaluation request: %s",
+            exc,
+            extra={"request_id": request_id, "error_code": "INVALID_REQUEST"},
+        )
         return _respond(
             400, error_response_body(request_id, "INVALID_REQUEST", "Request failed validation.")
         )
@@ -222,8 +250,17 @@ def handle_routes_evaluate(
     try:
         decision = services.route_service.evaluate(request)
     except Exception as exc:
-        logger.exception("Route evaluation failed request_id=%s", request_id)
         status, error_body = map_exception_to_status_and_body(exc, request_id)
+        logger.exception(
+            "Route evaluation failed",
+            extra={
+                "request_id": request_id,
+                "application_id": request.application_id,
+                "capability": request.requirements.capability,
+                "error_code": error_body["errorCode"],
+                "status_code": status,
+            },
+        )
         return _respond(status, error_body)
 
     # Unlike /v1/inference, evaluation never invokes a model, so "no eligible route" is
@@ -271,26 +308,38 @@ def dispatch(event: dict[str, Any], services: HandlerServices) -> dict[str, Any]
     request_id = _request_id(event)
     method = event.get("httpMethod", "")
     resource = event.get("resource", "")
+    log_extra = {
+        "request_id": request_id,
+        "http_method": method,
+        "resource": resource,
+    }
 
     try:
         if (method, resource) == ("GET", "/health"):
-            return handle_health()
-        if (method, resource) == ("GET", "/ready"):
-            return handle_ready(services)
-        if (method, resource) == ("POST", "/v1/inference"):
-            return handle_inference(event, request_id, services)
-        if (method, resource) == ("POST", "/v1/routes/evaluate"):
-            return handle_routes_evaluate(event, request_id, services)
-        if (method, resource) == ("GET", "/v1/models"):
-            return handle_models(request_id, services)
-        if (method, resource) == ("GET", "/v1/decisions/{decisionId}"):
-            return handle_get_decision(event, request_id, services)
-        return _respond(404, error_response_body(request_id, "NOT_FOUND", "Unknown route."))
+            response = handle_health()
+        elif (method, resource) == ("GET", "/ready"):
+            response = handle_ready(services)
+        elif (method, resource) == ("POST", "/v1/inference"):
+            response = handle_inference(event, request_id, services)
+        elif (method, resource) == ("POST", "/v1/routes/evaluate"):
+            response = handle_routes_evaluate(event, request_id, services)
+        elif (method, resource) == ("GET", "/v1/models"):
+            response = handle_models(request_id, services)
+        elif (method, resource) == ("GET", "/v1/decisions/{decisionId}"):
+            response = handle_get_decision(event, request_id, services)
+        else:
+            response = _respond(404, error_response_body(request_id, "NOT_FOUND", "Unknown route."))
     except Exception:
-        logger.exception("Unhandled error processing request request_id=%s", request_id)
-        return _respond(
+        logger.exception("Unhandled error processing request", extra=log_extra)
+        response = _respond(
             500, error_response_body(request_id, "INTERNAL_ERROR", "An unexpected error occurred.")
         )
+
+    logger.info(
+        "Request completed",
+        extra={**log_extra, "status_code": response["statusCode"]},
+    )
+    return response
 
 
 _SERVICES: HandlerServices | None = None
@@ -299,5 +348,6 @@ _SERVICES: HandlerServices | None = None
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     global _SERVICES
     if _SERVICES is None:
+        configure_logging()
         _SERVICES = build_services()
     return dispatch(event, _SERVICES)

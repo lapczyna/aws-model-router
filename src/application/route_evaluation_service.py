@@ -15,6 +15,7 @@ from domain.ports import (
     CostEstimator,
     IdentifierGenerator,
     ModelCatalogue,
+    ModelHealthRepository,
     RoutingPolicyRepository,
     TokenEstimator,
 )
@@ -33,6 +34,7 @@ class RouteEvaluationService:
         cost_estimator: CostEstimator,
         clock: Clock,
         identifier_generator: IdentifierGenerator,
+        model_health_repository: ModelHealthRepository | None = None,
     ) -> None:
         self._policy_repository = policy_repository
         self._model_catalogue = model_catalogue
@@ -40,6 +42,7 @@ class RouteEvaluationService:
         self._cost_estimator = cost_estimator
         self._clock = clock
         self._identifier_generator = identifier_generator
+        self._model_health_repository = model_health_repository
 
     def evaluate(self, request: InferenceRequest) -> RoutingDecision:
         """Evaluate the route for `request`.
@@ -82,6 +85,7 @@ class RouteEvaluationService:
             self._token_estimator,
             self._cost_estimator,
             request.messages,
+            self._model_health_repository,
         )
         eligible = [candidate for candidate in candidates if candidate.eligible]
         strategy = get_strategy(policy.routing_strategy)

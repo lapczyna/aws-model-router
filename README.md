@@ -11,14 +11,14 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 5 — AWS CDK infrastructure and serverless API.** The router is now a
-> real, deployable serverless system: one AWS CDK v2 (Python) stack provisions a REST
-> API (API Gateway), a single shared Lambda function behind all six routes, and two
-> encrypted, on-demand DynamoDB tables (routing-decision audit + cross-instance-safe
-> idempotency). IAM (SigV4) authorization protects every `/v1/*` route; `/health`/`/ready`
-> stay public. Everything from Phases 1–4 is unchanged — the Lambda handler is a thin
-> adapter over the same `InvocationOrchestrator`/`RouteEvaluationService` built in earlier
-> phases. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap.
+> **Status: Phase 6 — Observability, auditability, and cost governance.** The deployed
+> system (Phase 5) now ships structured JSON logs, a CloudWatch dashboard, and 7 alarms
+> (Lambda errors/throttles, API 5xx, provider failure, fallback rate, no-eligible-model,
+> estimated-spend guidance) backed by custom metrics published as CloudWatch Embedded
+> Metric Format log lines — no extra `PutMetricData` calls or IAM permissions. The model
+> health signal modeled since Phase 2 (`ModelHealth`/`MODEL_UNHEALTHY`) is finally wired
+> into candidate filtering, derived from observed invocation outcomes. See
+> [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -167,6 +167,40 @@ routes (ADR-016), and two DynamoDB tables.
 See [`docs/operations/deployment-and-teardown.md`](docs/operations/deployment-and-teardown.md)
 for `cdk deploy`/`cdk destroy` usage and what `RemovalPolicy.RETAIN` means for `prod`.
 
+## Observability, auditability, and cost governance
+
+* **Structured logging** (ADR-019): `src/shared/structured_logging.py`'s `JsonFormatter`
+  emits one JSON object per log line, with a fixed, documented whitelist of safe
+  attributes (`request_id`, `decision_id`, `application_id`, `capability`, `model_alias`,
+  `error_code`, `latency_ms`, ...) — never raw prompt/response content (ADR-008
+  unchanged).
+* **Custom metrics via CloudWatch Embedded Metric Format** (ADR-019):
+  `adapters.metrics.EmfMetricsPublisher` writes one EMF JSON line per metric point —
+  `RequestCount`, `FallbackUsedCount`, `NoEligibleModelCount`, `EstimatedCostUsd`,
+  `InvocationAttemptCount`, `InvocationLatencyMs`, `ProviderFailureCount` — auto-extracted
+  by CloudWatch with **no extra `PutMetricData` API call and no new IAM permission**.
+  Every metric declares exactly one CloudWatch dimension (`Environment`); per-model/
+  per-capability breakdowns go through CloudWatch Logs Insights instead (see
+  [`docs/operations/observability.md`](docs/operations/observability.md) for why).
+* **Model health signal** (ADR-020): `ModelHealthRepository` derives a per-model
+  `HEALTHY`/`DEGRADED`/`UNAVAILABLE` status from a consecutive-failure counter —
+  `InvocationOrchestrator` records every attempt's outcome, and candidate filtering
+  (`domain/filtering.py`) excludes `UNAVAILABLE` models (`MODEL_UNHEALTHY`) while
+  flagging `DEGRADED` ones informationally (`MODEL_DEGRADED`) without excluding them.
+  The in-memory reference implementation is process-local by design — see ADR-020 for
+  why that's an acceptable trade-off here, unlike idempotency.
+* **Dashboard and alarms** (ADR-021): `ObservabilityConstruct` provisions a CloudWatch
+  dashboard and 7 alarms (Lambda errors/throttles, API 5xx, provider failure, fallback
+  rate, no-eligible-model, estimated-spend guidance), all notifying one SNS topic —
+  subscribe your own endpoint post-deploy (`docs/operations/runbook.md`); no
+  placeholder/fabricated endpoint is created for you.
+
+Full guides: [`docs/operations/observability.md`](docs/operations/observability.md)
+(logs/metrics/dashboard reference), [`docs/operations/alarm-response.md`](docs/operations/alarm-response.md)
+(what to do when an alarm fires), [`docs/operations/runbook.md`](docs/operations/runbook.md)
+(routine operational tasks), and [`docs/cost/cost-estimation-guide.md`](docs/cost/cost-estimation-guide.md)
+(the estimate-vs-billing gap, pricing updates, retry/fallback cost multiplication).
+
 ## Try it locally
 
 Evaluate a routing decision without any AWS credentials, using the sample policies and
@@ -218,6 +252,9 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [016](docs/adr/0016-single-shared-lambda-handler.md) | Single shared Lambda handler |
 | [017](docs/adr/0017-lambda-packaging-without-experimental-cdk-constructs.md) | Lambda packaging without experimental CDK constructs |
 | [018](docs/adr/0018-dynamodb-decision-and-idempotency-store-design.md) | DynamoDB decision and idempotency store design |
+| [019](docs/adr/0019-observability-approach.md) | Observability approach — structured logging and EMF custom metrics |
+| [020](docs/adr/0020-model-health-signal-scope.md) | Model health signal — scope and derivation |
+| [021](docs/adr/0021-alerting-design.md) | Alerting design — CloudWatch alarms and a single SNS topic |
 
 ## Repository structure
 
@@ -227,9 +264,9 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 ├── docs/
 │   ├── adr/                 # Architecture Decision Records
 │   ├── architecture/        # Overview, diagrams, API contracts, domain glossary
-│   ├── operations/          # Deployment/teardown; runbooks, alarm response (from Phase 6)
+│   ├── operations/          # Deployment/teardown, observability, alarm-response, runbook
 │   ├── security/            # Threat model, security architecture (from Phase 7)
-│   └── cost/                # Cost estimation & pricing-update guides (from Phase 6)
+│   └── cost/                # Cost estimation & pricing-update guide
 ├── events/                  # Sample HTTP-shape request bodies for invoke_lambda_locally.py
 ├── infrastructure/          # AWS CDK v2 (Python) app
 │   ├── app.py
@@ -237,15 +274,15 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── config.py
 │   ├── bundling.py
 │   ├── stacks/
-│   └── cdk_constructs/       # storage (DynamoDB), lambda, api gateway constructs
+│   └── cdk_constructs/       # storage (DynamoDB), lambda, api gateway, observability constructs
 ├── policies/                # Version-controlled routing policy & model catalogue configuration
 ├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock_live_smoke_test.py
 ├── src/
 │   ├── domain/               # Pure Python domain models, routing strategies, reason codes
 │   ├── application/          # Orchestration: validation → policy → filter → cost → strategy → invoke
-│   ├── adapters/              # BedrockModelProvider, DynamoDB-backed repositories, metrics
+│   ├── adapters/              # BedrockModelProvider, DynamoDB repositories, in-memory health, EMF metrics
 │   ├── handlers/              # Thin AWS Lambda entry point (api_handler.py)
-│   └── shared/                 # Cross-cutting utilities (Clock, IdentifierGenerator, etc.)
+│   └── shared/                 # Clock, IdentifierGenerator, structured JSON logging
 ├── tests/
 │   ├── contract/             # Provider/API contract tests
 │   ├── infra/                 # CDK template-assertion tests (pytest.mark.infra, opt-in)
@@ -337,8 +374,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 2 | Domain model and local routing engine (no AWS) |
 | 3 | Bedrock provider adapter (fakes/Stubber in tests, opt-in smoke test) |
 | 4 | Fallback, experimentation, and idempotency |
-| 5 | AWS CDK infrastructure and serverless API *(this phase)* |
-| 6 | Observability, auditability, and cost governance |
+| 5 | AWS CDK infrastructure and serverless API |
+| 6 | Observability, auditability, and cost governance *(this phase)* |
 | 7 | Security and resilience hardening |
 | 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |
 | 9 | Performance, load testing, and portfolio polish |

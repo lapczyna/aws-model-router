@@ -15,6 +15,7 @@ from constructs import Construct
 
 from cdk_constructs.api_construct import ApiConstruct
 from cdk_constructs.lambda_construct import LambdaConstruct
+from cdk_constructs.observability_construct import ObservabilityConstruct
 from cdk_constructs.storage_construct import StorageConstruct
 from config import EnvironmentConfig
 
@@ -50,7 +51,30 @@ class ModelRouterStack(Stack):
             lambda_alias=compute.alias,
         )
 
+        observability = ObservabilityConstruct(
+            self,
+            "Observability",
+            environment_config=environment_config,
+            function=compute.function,
+            rest_api=api.rest_api,
+        )
+
         CfnOutput(self, "ApiUrl", value=api.rest_api.url, description="Base URL of the REST API")
+        CfnOutput(
+            self,
+            "DashboardUrl",
+            value=(
+                f"https://{self.region}.console.aws.amazon.com/cloudwatch/home"
+                f"?region={self.region}#dashboards:name={observability.dashboard.dashboard_name}"
+            ),
+            description="CloudWatch dashboard URL",
+        )
+        CfnOutput(
+            self,
+            "AlarmTopicArn",
+            value=observability.alarm_topic.topic_arn,
+            description="SNS topic alarms publish to — subscribe your own endpoint to it",
+        )
         CfnOutput(
             self,
             "ApiFunctionName",
