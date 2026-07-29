@@ -288,10 +288,10 @@ Branch-protection recommendations documented.
       infra, `CDK_NAG_ENABLED=true cdk synth`, cfn-lint, pip-audit) was independently
       executed and verified to pass locally against this exact repository state, and
       the YAML itself is validated. **Not yet exercised as an actual GitHub-hosted
-      workflow run** — this repository has committed directly to `main` every phase so
-      far (see the open question in this phase's report); actually observing a green
-      run requires either opening a real PR or the user's decision on the workflow
-      change below
+      workflow run**: raised as an open question in this phase's report — resolved by
+      the user as "keep committing directly to `main` for now," so `pr.yml` remains a
+      documented, ready-to-adopt path rather than an enforced gate today. Revisit this
+      checkbox if/when PRs become the actual workflow.
 - [x] Deployment workflow deploys to dev and requires manual approval for prod —
       `deploy.yml`'s `deploy-prod` job targets the `prod` GitHub Environment, which
       pauses for approval once the required-reviewers protection rule is configured
@@ -304,7 +304,7 @@ Branch-protection recommendations documented.
       configuration: `pr.yml` (the only workflow a fork PR can trigger) requests no
       `id-token` permission and references no AWS credential anywhere in the file
       (ADR-026)
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 ### Phase 9 — Performance, load testing, and portfolio polish
 Contract tests, controlled load tests, fault injection (throttling/fallback/idempotency
@@ -344,7 +344,7 @@ traffic unvalidated.
 | Phase 5 — AWS CDK infrastructure and serverless API | Complete | `0b88448` |
 | Phase 6 — Observability, auditability, and cost governance | Complete | `e2a6cd3` |
 | Phase 7 — Security and resilience hardening | Complete | `a9cb141` |
-| Phase 8 — CI/CD with GitHub Actions | Complete | *pending — filled in after commit/push* |
+| Phase 8 — CI/CD with GitHub Actions | Complete | `fc9fe49` |
 
 ## Remaining milestones
 
@@ -521,16 +521,15 @@ incorrect:
 * **Test count after Phase 7**: 313 tests in the default `pytest` run (up from 303 after
   Phase 6 — 10 new abuse-case tests), plus 39 opt-in CDK assertion tests (`pytest -m
   infra`, up from 38 — 1 new for the tightened DynamoDB IAM grants).
-* **Open question carried into Phase 9 (or sooner)**: every phase 1–7 commit went
-  directly to `main` — there has never been a pull request in this repository's
-  history. Phase 8's `pr.yml` only triggers on `pull_request` events, and the
-  branch-protection recommendations in `docs/operations/ci-cd.md` (required status
-  checks, no direct pushes to `main`) would, if adopted, end the direct-to-`main`
-  pattern every phase so far has used. This is flagged for the user to decide, not
-  silently changed — the workflow files and docs are correct and ready either way, but
-  actually observing a green `pr.yml` run requires either opening a real PR at least
-  once, or a decision to keep direct-to-`main` commits and treat `pr.yml` as
-  documentation/a future-adoption path rather than an enforced gate today.
+* **Resolved: direct-to-`main` commits continue for now** — every phase 1–8 commit has
+  gone directly to `main`; there has never been a pull request in this repository's
+  history. Asked explicitly at the end of Phase 8, the user chose to keep committing
+  directly to `main` rather than switch to a PR-based flow. `pr.yml` therefore remains a
+  documented, ready-to-adopt path (every command in it independently verified to pass
+  locally) rather than an actively enforced gate — it has not yet been exercised as a
+  real GitHub-hosted workflow run. Revisit if/when the user decides to adopt PRs; the
+  branch-protection recommendations in `docs/operations/ci-cd.md` describe exactly what
+  to enable at that point.
 * **cfn-lint caught a real bug cdk-nag did not** (ADR-027): `AWS::CloudWatch::Dashboard`
   (Phase 6's `ObservabilityConstruct`) was being tagged by the stack-wide
   `Tags.of(stack).add(...)` calls, but CloudFormation's resource schema for that
