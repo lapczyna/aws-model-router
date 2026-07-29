@@ -1,0 +1,135 @@
+name: Deploy
+
+# Deploys ModelRouter-dev automatically on every push to main; ModelRouter-prod only
+# after dev succeeds, gated by the "prod" GitHub Environment's required-reviewers
+# protection rule (configured in repo settings, not in this file — see
+# docs/operations/ci-cd.md). Never triggered by pull_request — a fork PR (or any PR)
+# has zero path to this workflow or the AWS credentials it uses (ADR-026).
+#
+# Rollback: re-run this workflow via "Run workflow" (workflow_dispatch), selecting the
+# last-known-good tag/commit from the branch/ref picker — see
+# docs/operations/ci-cd.md#rollback.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  deploy-dev:
+    name: Deploy dev
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      id-token: write # required for aws-actions/configure-aws-credentials (OIDC)
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: pip install -e ".[dev,infra]"
+      - run: npm install -g aws-cdk
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-deploy-dev
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: cdk diff
+        working-directory: infrastructure
+        run: |
+          echo '## CDK diff — dev' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cdk diff -c env=dev ModelRouter-dev >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: cdk deploy
+        working-directory: infrastructure
+        run: |
+          cdk deploy -c env=dev ModelRouter-dev \
+            --require-approval never \
+            --outputs-file outputs.json
+      - name: Smoke test (public, unauthenticated routes only)
+        working-directory: infrastructure
+        run: |
+          API_URL=$(python -c "import json; print(json.load(open('outputs.json'))['ModelRouter-dev']['ApiUrl'])")
+          echo "Testing $API_URL"
+          curl --fail --silent --show-error "${API_URL}health" | tee /dev/stderr | grep -q '"status":"ok"'
+          curl --fail --silent --show-error "${API_URL}ready" | tee /dev/stderr | grep -q '"status":"ready"'
+      - name: Deployment summary
+        if: always()
+        working-directory: infrastructure
+        run: |
+          {
+            echo "## Deployment summary — dev"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Result: ${{ job.status }}"
+            if [ -f outputs.json ]; then
+              echo "- API URL: $(python -c "import json; print(json.load(open('outputs.json'))['ModelRouter-dev']['ApiUrl'])")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-prod:
+    name: Deploy prod
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment: prod # required-reviewers protection rule pauses here for approval
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: pip install -e ".[dev,infra]"
+      - run: npm install -g aws-cdk
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-actions-deploy-prod
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: cdk diff
+        working-directory: infrastructure
+        run: |
+          echo '## CDK diff — prod' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cdk diff -c env=prod ModelRouter-prod >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: cdk deploy
+        working-directory: infrastructure
+        run: |
+          cdk deploy -c env=prod ModelRouter-prod \
+            --require-approval never \
+            --outputs-file outputs.json
+      - name: Smoke test (public, unauthenticated routes only)
+        working-directory: infrastructure
+        run: |
+          API_URL=$(python -c "import json; print(json.load(open('outputs.json'))['ModelRouter-prod']['ApiUrl'])")
+          echo "Testing $API_URL"
+          curl --fail --silent --show-error "${API_URL}health" | tee /dev/stderr | grep -q '"status":"ok"'
+          curl --fail --silent --show-error "${API_URL}ready" | tee /dev/stderr | grep -q '"status":"ready"'
+      - name: Deployment summary
+        if: always()
+        working-directory: infrastructure
+        run: |
+          {
+            echo "## Deployment summary — prod"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Result: ${{ job.status }}"
+            if [ -f outputs.json ]; then
+              echo "- API URL: $(python -c "import json; print(json.load(open('outputs.json'))['ModelRouter-prod']['ApiUrl'])")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

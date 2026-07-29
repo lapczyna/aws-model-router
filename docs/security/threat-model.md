@@ -57,13 +57,13 @@ the next concrete step, not deferred without a plan.
 | T15 | Retry/fallback cost amplification during a provider incident | Bounded ceiling: `FallbackPolicy.maximum_attempts × RetryPolicy.max_attempts` (ADR-014), never open-ended | None — the ceiling is fixed and tested | Mitigated |
 | T16 | DynamoDB data tampering via over-broad IAM | Explicit minimal action grants, no `Scan`/`Query`/`UpdateItem` (ADR-022) | None found | Mitigated |
 | T17 | Cross-tenant decision access (`GET /v1/decisions/{decisionId}`) | `applicationId` ownership check (`handle_get_decision`, tested — wrong owner → `403`) | Inherits T2's residual risk (the check compares against the *claimed* `applicationId`, not a verified IAM-bound one) | Mitigated (conditional on T2's status) |
-| T18 | Supply-chain compromise of a Python dependency | Dependencies are version-pinned (`pyproject.toml`) | No automated vulnerability scanning yet | Deferred to Phase 8 (dependency vulnerability scanning in CI) |
+| T18 | Supply-chain compromise of a Python dependency | Version-pinned (`pyproject.toml`) plus automated scanning: `pip-audit` runs as a required PR check (`.github/workflows/pr.yml`), and Dependabot proposes version-bump PRs weekly (`.github/dependabot.yml`) | A small, tracked set of dev-tooling-only advisories (black/pytest, no fix available inside this project's current version pin) are explicitly ignored with inline justification, not silently — see `docs/operations/ci-cd.md` | Mitigated |
 
 ## Boundary 5 — Administrative / deploy-time
 
 | ID | Threat | Mitigation | Residual risk | Status |
 |---|---|---|---|---|
-| T19 | Compromised CI/CD deploy credentials | Planned: GitHub OIDC, no static AWS keys in GitHub secrets | Not yet built | Deferred to Phase 8 |
+| T19 | Compromised CI/CD deploy credentials | GitHub OIDC, no static AWS keys in GitHub secrets ([ADR-025](../adr/0025-github-oidc-deploy-role-design.md)); the GitHub-trusted role itself only grants `sts:AssumeRole` on the CDK bootstrap roles, never broad permissions directly; PR validation and deployment are separate workflows with disjoint triggers, so a fork PR has no path to any deploy credential at all ([ADR-026](../adr/0026-pr-and-deploy-workflow-separation.md)) | A compromised `main`-branch push (e.g. a maintainer's own compromised account) still reaches `deploy-dev` automatically — `prod` requires a separate human approval (the Environment's required-reviewers rule) | Mitigated |
 | T20 | Unauthorized manual AWS console changes drifting from CDK-defined state | Documented operational discipline (`docs/operations/runbook.md`): manual edits are silently overwritten by the next `cdk deploy` | Detection relies on someone eventually redeploying, not real-time drift detection | Accepted — CloudFormation drift detection is a documented future enhancement, not built speculatively |
 
 ## Cross-cutting: AI content safety
@@ -77,10 +77,10 @@ the next concrete step, not deferred without a plan.
 
 22 threats identified across 5 trust boundaries plus AI content safety. 13 Mitigated
 (with a real, verifiable control — code, test, or ADR-documented architectural
-constraint), 6 Accepted (a genuine residual risk with explicit rationale for not closing
-it further now), 3 Deferred (explicitly scoped to Phase 8, or contingent on a
-not-yet-built feature per ADR-024). No threat here is silently unaddressed — every row
-has a status and a reason.
+constraint), 7 Accepted (a genuine residual risk with explicit rationale for not closing
+it further now), 2 Deferred (T21/T22, contingent on the not-yet-built Guardrails
+integration per ADR-024). No threat here is silently unaddressed — every row has a
+status and a reason.
 
 The most significant open item is **T2** (cross-application impersonation via
 `applicationId` spoofing) — already flagged as a known limitation when the

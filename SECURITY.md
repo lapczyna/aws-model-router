@@ -67,8 +67,13 @@ layer-by-layer narrative). In summary:
   [ADR-024](docs/adr/0024-responsible-ai-gateway-placement.md) for the recommended
   Bedrock Guardrails integration point (not yet built).
 * All CI/CD deployment uses GitHub OIDC — no long-lived AWS access keys are stored in
-  GitHub secrets (Phase 8).
-* Dependencies are pinned and scanned for known vulnerabilities in CI (Phase 8).
+  GitHub secrets (see [ADR-025](docs/adr/0025-github-oidc-deploy-role-design.md)); PR
+  validation and deployment are separate workflows with disjoint triggers, so a fork PR
+  has no path to any deploy credential (see
+  [ADR-026](docs/adr/0026-pr-and-deploy-workflow-separation.md)).
+* Dependencies are pinned and scanned for known vulnerabilities in CI (`pip-audit`,
+  `.github/workflows/pr.yml`) and kept current via Dependabot
+  (`.github/dependabot.yml`).
 
 ## Supported versions
 

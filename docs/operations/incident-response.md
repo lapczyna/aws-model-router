@@ -51,7 +51,7 @@ expected behavior:
 ## Suspected compromised AWS credentials (Lambda execution role or deploy role)
 
 1. Identify the specific role (`ComputeApiFunctionServiceRole...` for runtime,
-   the GitHub OIDC deploy role for CI/CD — Phase 8) via CloudTrail.
+   `github-actions-deploy-dev`/`-prod` for CI/CD — ADR-025) via CloudTrail.
 2. Attach an explicit `Deny` policy to the affected role immediately (faster than
    waiting to redeploy with a new role) while investigating scope.
 3. Rotate: for the deploy role, review/rotate the OIDC trust policy; for the Lambda

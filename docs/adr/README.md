@@ -67,3 +67,6 @@ What else was evaluated, and why was it not chosen?
 | [ADR-022](0022-least-privilege-iam-review.md) | Least-privilege IAM review | Accepted |
 | [ADR-023](0023-cross-region-inference-profile-resilience.md) | Cross-Region inference profile resilience evaluation | Accepted |
 | [ADR-024](0024-responsible-ai-gateway-placement.md) | Responsible AI Gateway placement | Accepted |
+| [ADR-025](0025-github-oidc-deploy-role-design.md) | GitHub OIDC deploy role design | Accepted |
+| [ADR-026](0026-pr-and-deploy-workflow-separation.md) | PR and deployment workflow separation | Accepted |
+| [ADR-027](0027-iac-security-scanning-approach.md) | IaC security scanning — cdk-nag and cfn-lint | Accepted |

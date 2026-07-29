@@ -1,0 +1,51 @@
+name: Pricing freshness reminder
+
+# Optional (PROJECT_PLAN.md Phase 8 scope). Monthly reminder that
+# policies/model_catalogue.yaml's pricing may have drifted from AWS's current Bedrock
+# pricing (docs/cost/cost-estimation-guide.md's "Keeping pricing current" section) — a
+# manual review/update process, not something this workflow can verify automatically
+# (it has no way to know current AWS list pricing). Opens at most one tracking issue at
+# a time; skips if one is already open.
+
+on:
+  schedule:
+    - cron: "0 9 1 * *" # 09:00 UTC on the 1st of every month
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for an existing open reminder
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          count=$(gh issue list --repo "$GITHUB_REPOSITORY" --label pricing-review --state open --json number --jq 'length')
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Open a tracking issue
+        if: steps.existing.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Monthly pricing review: policies/model_catalogue.yaml" \
+            --label pricing-review \
+            --body "$(cat <<'EOF'
+          Routine reminder (see docs/cost/cost-estimation-guide.md#keeping-pricing-current).
+
+          - [ ] Compare each model's `input_price_per_1k_tokens`/`output_price_per_1k_tokens`
+                in `policies/model_catalogue.yaml` against current AWS Bedrock pricing.
+          - [ ] If anything changed, update the values and bump that model's
+                `pricing_version`.
+          - [ ] Close this issue once reviewed (no change needed is a valid outcome).
+
+          This issue was opened automatically by
+          `.github/workflows/pricing-freshness-reminder.yml`.
+          EOF
+          )"

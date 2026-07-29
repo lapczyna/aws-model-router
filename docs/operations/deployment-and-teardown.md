@@ -20,6 +20,10 @@ teardown section *before* running `cdk destroy` against `prod`.
   local, Docker-free `pip install --platform manylinux2014_x86_64` path first and only
   falls back to Docker-based bundling if that fails (ADR-017).
 
+Deploying via GitHub Actions instead of locally? See
+[`ci-cd.md`](ci-cd.md) — it requires its own one-time bootstrap
+(`cdk deploy GitHubOidc`) in addition to the steps below.
+
 ## Environments
 
 `dev` and `prod` are CDK context-selected (`-c env=...`), not separate CDK apps —
@@ -42,9 +46,11 @@ cd infrastructure
 # Preview the CloudFormation template without deploying anything
 cdk synth -c env=dev
 
-# Deploy
-cdk deploy -c env=dev
-cdk deploy -c env=prod
+# Deploy — the stack name is required since the app also defines a second,
+# separately-deployed stack (GitHubOidc, ADR-025) that `cdk deploy` would otherwise
+# ask you to disambiguate
+cdk deploy -c env=dev ModelRouter-dev
+cdk deploy -c env=prod ModelRouter-prod
 ```
 
 `cdk deploy` prints four outputs you'll need for the next steps: `ApiUrl`,
@@ -65,7 +71,7 @@ python scripts/invoke_lambda_locally.py --method GET --resource /v1/models --use
 
 # Makes a real, billable Bedrock call — requires --confirm-cost
 python scripts/invoke_lambda_locally.py --method POST --resource /v1/inference \
-    --body scripts/examples/api/support_assistant_balanced.json \
+    --body events/support_assistant_balanced.json \
     --use-real-services --confirm-cost
 ```
 
@@ -77,13 +83,13 @@ unauthenticated and reachable with plain `curl`.
 ## Tearing down
 
 ```bash
-cdk destroy -c env=dev
+cdk destroy -c env=dev ModelRouter-dev
 ```
 
 **`dev`**: `RemovalPolicy.DESTROY` — the DynamoDB tables and CloudWatch log groups are
 deleted along with the stack. Nothing is recoverable afterward.
 
-**`prod`**: `RemovalPolicy.RETAIN` (ADR-018) — `cdk destroy -c env=prod` deletes the
+**`prod`**: `RemovalPolicy.RETAIN` (ADR-018) — `cdk destroy -c env=prod ModelRouter-prod` deletes the
 stack's *managed* resources (Lambda function, API Gateway, IAM roles) but **the two
 DynamoDB tables and both CloudWatch log groups are left behind**, orphaned from the
 stack, still accruing storage cost. This is deliberate: it prevents an accidental

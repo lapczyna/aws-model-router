@@ -11,15 +11,15 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 7 — Security and resilience hardening.** A full threat model (22
-> threats across 5 trust boundaries plus AI content safety —
-> [`docs/security/threat-model.md`](docs/security/threat-model.md)), a least-privilege
-> IAM review that found and fixed a real over-broad DynamoDB grant, abuse-case tests
-> (data-leakage, field-smuggling, adversarial input), and documented positions on
-> cross-Region resilience and Responsible AI Gateway placement. Routing remains
-> deterministic and explainable — this project makes no claim that routing alone
-> provides AI safety. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased
-> roadmap.
+> **Status: Phase 8 — CI/CD with GitHub Actions.** GitHub OIDC (no static AWS keys) via
+> a dedicated, least-privilege bootstrap stack; a PR workflow (lint, typecheck, tests,
+> CDK assertion tests, cdk-nag + cfn-lint IaC scanning, dependency and secret scanning)
+> with zero AWS credentials — a fork PR gets identical treatment, by construction, not
+> configuration; a deployment workflow (auto dev, manually-approved prod). Adding
+> cfn-lint caught a genuine, previously-latent bug: a CloudFormation resource type
+> (`AWS::CloudWatch::Dashboard`) doesn't yet accept the `Tags` property CDK's tagging
+> aspect was applying to it. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full
+> phased roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -236,6 +236,37 @@ Full guides: [`docs/security/security-architecture.md`](docs/security/security-a
 (what's tested vs. deferred to Phase 9), [`docs/operations/incident-response.md`](docs/operations/incident-response.md),
 and [`docs/operations/disaster-recovery.md`](docs/operations/disaster-recovery.md).
 
+## CI/CD
+
+* **GitHub OIDC, no static AWS keys** ([ADR-025](docs/adr/0025-github-oidc-deploy-role-design.md)):
+  `infrastructure/stacks/github_oidc_stack.py` — deployed manually, once, by a human —
+  creates the OIDC trust and two per-environment deploy roles. Each role grants only
+  `sts:AssumeRole` on the three roles `cdk bootstrap` itself already created; the actual
+  resource-creation permissions stay on that separately-governable bootstrap role, not
+  duplicated onto the GitHub-trusted role.
+* **PR and deployment are separate workflows, by construction**
+  ([ADR-026](docs/adr/0026-pr-and-deploy-workflow-separation.md)): `pr.yml` (every pull
+  request, including forks) requests no `id-token` permission and touches no AWS
+  credential anywhere in the file — there's nothing for a fork PR to exploit, no
+  configuration to get right. `deploy.yml` triggers only on a push to `main`, deploying
+  `dev` automatically and `prod` only after a human approves the `prod` GitHub
+  Environment's required-reviewers protection rule.
+* **IaC security scanning: cdk-nag + cfn-lint**
+  ([ADR-027](docs/adr/0027-iac-security-scanning-approach.md)): `cdk-nag`'s
+  `AwsSolutionsChecks` runs as a gated CDK Aspect (`CDK_NAG_ENABLED=true`); every
+  finding is fixed (a real `RequestValidator` was added for API Gateway request
+  validation) or suppressed with a written, ADR-linked justification — never a blanket
+  bypass. cfn-lint, run separately against the synthesized templates, caught a genuine
+  bug cdk-nag didn't: `AWS::CloudWatch::Dashboard` doesn't yet support the `Tags`
+  property CDK's tagging aspect was applying to it — a real, previously-latent
+  deployment-breaking defect, fixed by excluding that resource type from tagging.
+* Also in `pr.yml`: `pip-audit` (dependency vulnerability scanning) and `gitleaks`
+  (secret scanning), both required checks, not advisory-only.
+
+Full guide, including one-time manual setup (OIDC bootstrap, GitHub Environments,
+branch protection) and rollback guidance:
+[`docs/operations/ci-cd.md`](docs/operations/ci-cd.md).
+
 ## Try it locally
 
 Evaluate a routing decision without any AWS credentials, using the sample policies and
@@ -293,17 +324,24 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [022](docs/adr/0022-least-privilege-iam-review.md) | Least-privilege IAM review |
 | [023](docs/adr/0023-cross-region-inference-profile-resilience.md) | Cross-Region inference profile resilience evaluation |
 | [024](docs/adr/0024-responsible-ai-gateway-placement.md) | Responsible AI Gateway placement |
+| [025](docs/adr/0025-github-oidc-deploy-role-design.md) | GitHub OIDC deploy role design |
+| [026](docs/adr/0026-pr-and-deploy-workflow-separation.md) | PR and deployment workflow separation |
+| [027](docs/adr/0027-iac-security-scanning-approach.md) | IaC security scanning — cdk-nag and cfn-lint |
 
 ## Repository structure
 
 ```
 .
-├── .github/                 # PR/issue templates, CI/CD workflows (from Phase 8)
+├── .github/
+│   ├── workflows/            # pr.yml, deploy.yml, pricing-freshness-reminder.yml
+│   ├── dependabot.yml
+│   ├── ISSUE_TEMPLATE/
+│   └── PULL_REQUEST_TEMPLATE.md
 ├── docs/
 │   ├── adr/                 # Architecture Decision Records
 │   ├── architecture/        # Overview, diagrams, API contracts, domain glossary
 │   ├── operations/          # Deployment/teardown, observability, alarm-response, runbook,
-│   │                        # incident-response, disaster-recovery
+│   │                        # incident-response, disaster-recovery, ci-cd
 │   ├── security/            # Threat model, security architecture, resilience test plan
 │   └── cost/                # Cost estimation & pricing-update guide
 ├── events/                  # Sample HTTP-shape request bodies for invoke_lambda_locally.py
@@ -312,7 +350,7 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── cdk.json
 │   ├── config.py
 │   ├── bundling.py
-│   ├── stacks/
+│   ├── stacks/               # model_router_stack.py, github_oidc_stack.py
 │   └── cdk_constructs/       # storage (DynamoDB), lambda, api gateway, observability constructs
 ├── policies/                # Version-controlled routing policy & model catalogue configuration
 ├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock_live_smoke_test.py
@@ -343,12 +381,16 @@ full rule set.
 
 ## Local development setup
 
-Requires **Python 3.12**. AWS credentials are **not** required for the domain logic,
-routing engine, Bedrock adapter tests, Lambda handler tests, or fake-mode local
+Requires **Python 3.12**, plus **Node.js** (any current LTS) if you'll touch
+`infrastructure/` or run `pytest -m infra` — `aws-cdk-lib`'s jsii bridge runs on Node
+under the hood even when only calling its Python API (`Template.from_stack(...)`), not
+just for the `cdk` CLI itself. AWS credentials are **not** required for the domain
+logic, routing engine, Bedrock adapter tests, Lambda handler tests, CDK assertion tests
+(`pytest -m infra` synthesizes against a fixed, fake account/Region), or fake-mode local
 invocation (`scripts/invoke_lambda_locally.py`) — all use fakes/stubs/in-memory adapters.
-Real AWS credentials are only needed to actually `cdk deploy`/`cdk destroy`, run the CDK
-assertion tests' `cdk synth` (`pytest -m infra` still needs no credentials, just a local
-`aws-cdk-lib`/`pip` — see below), or invoke `invoke_lambda_locally.py --use-real-services`.
+Real AWS credentials are only needed to actually `cdk deploy`/`cdk destroy`
+(`docs/operations/deployment-and-teardown.md`, `docs/operations/ci-cd.md`), or invoke
+`invoke_lambda_locally.py --use-real-services`.
 
 ```bash
 # Create and activate a virtual environment
@@ -393,7 +435,8 @@ pytest
 ## Coding standards (summary)
 
 * Python 3.12, fully type-hinted, `mypy --strict`.
-* Black + Ruff enforced locally (pre-commit) and in CI (Phase 8).
+* Black + Ruff enforced locally (pre-commit) and in CI
+  ([`.github/workflows/pr.yml`](.github/workflows/pr.yml)).
 * UTC, timezone-aware timestamps only (no naive `datetime`).
 * `Decimal` for all monetary calculations — never `float`.
 * Immutable domain objects where practical; dependency inversion between layers.
@@ -415,8 +458,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 4 | Fallback, experimentation, and idempotency |
 | 5 | AWS CDK infrastructure and serverless API |
 | 6 | Observability, auditability, and cost governance |
-| 7 | Security and resilience hardening *(this phase)* |
-| 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |
+| 7 | Security and resilience hardening |
+| 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) *(this phase)* |
 | 9 | Performance, load testing, and portfolio polish |
 | 10 | Advanced extensions *(optional, explicit request only)* |
 

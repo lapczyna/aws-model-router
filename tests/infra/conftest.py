@@ -65,11 +65,15 @@ def synthesized_stacks() -> dict[str, SynthesizedStack]:
             environment_config=environment_config,
             env=env,
         )
-        # Mirrors infrastructure/app.py's tagging, which happens at the app entry
-        # point rather than inside ModelRouterStack itself.
-        cdk.Tags.of(stack).add("Project", "aws-model-router")
-        cdk.Tags.of(stack).add("Environment", environment_config.env_name)
-        cdk.Tags.of(stack).add("ManagedBy", "cdk")
+        # Mirrors infrastructure/app.py's tagging (including the Dashboard exclusion —
+        # CloudFormation doesn't yet support Tags on AWS::CloudWatch::Dashboard), which
+        # happens at the app entry point rather than inside ModelRouterStack itself.
+        excluded = ["AWS::CloudWatch::Dashboard"]
+        cdk.Tags.of(stack).add("Project", "aws-model-router", exclude_resource_types=excluded)
+        cdk.Tags.of(stack).add(
+            "Environment", environment_config.env_name, exclude_resource_types=excluded
+        )
+        cdk.Tags.of(stack).add("ManagedBy", "cdk", exclude_resource_types=excluded)
         raw_stacks[env_name] = stack
 
     app.synth()
@@ -90,3 +94,22 @@ def dev_stack(synthesized_stacks: dict[str, SynthesizedStack]) -> SynthesizedSta
 @pytest.fixture(scope="session")
 def prod_stack(synthesized_stacks: dict[str, SynthesizedStack]) -> SynthesizedStack:
     return synthesized_stacks["prod"]
+
+
+@pytest.fixture(scope="session")
+def github_oidc_template() -> "Template":
+    if str(_INFRA_DIR) not in sys.path:
+        sys.path.insert(0, str(_INFRA_DIR))
+
+    import aws_cdk as cdk
+    from aws_cdk.assertions import Template as _Template
+
+    from stacks.github_oidc_stack import GitHubOidcStack
+
+    app = cdk.App()
+    env = cdk.Environment(account=_FIXED_ACCOUNT, region=_FIXED_REGION)
+    stack = GitHubOidcStack(
+        app, "GitHubOidc", github_org="lapczyna", github_repo="aws-model-router", env=env
+    )
+    app.synth()
+    return _Template.from_stack(stack)

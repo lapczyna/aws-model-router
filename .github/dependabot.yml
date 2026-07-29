@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      dev-tooling:
+        patterns:
+          - "ruff"
+          - "black"
+          - "mypy"
+          - "pytest*"
+          - "pre-commit"
+        update-types:
+          - "minor"
+          - "patch"
+      aws-cdk:
+        patterns:
+          - "aws-cdk-lib"
+          - "constructs"
+          - "cdk-nag"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "ci-cd"

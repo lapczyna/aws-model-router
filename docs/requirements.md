@@ -208,3 +208,12 @@ NFR-8.1. The system can be deployed and torn down entirely via documented comman
 
 NFR-8.2. Development and production environments are isolated (separate stacks,
 configuration, and IAM roles).
+
+NFR-8.3. Automated deployment authenticates to AWS via GitHub OIDC — no long-lived AWS
+access keys are stored as GitHub secrets (see
+[ADR-025](adr/0025-github-oidc-deploy-role-design.md)). Pull-request validation and
+deployment are separate workflows with disjoint triggers, so a fork PR has no path to
+deployment credentials (see [ADR-026](adr/0026-pr-and-deploy-workflow-separation.md)).
+The one-time manual bootstrap this depends on (the OIDC trust itself, and repository
+Environment/branch-protection configuration) is fully documented, not undocumented
+console steps — see [`docs/operations/ci-cd.md`](operations/ci-cd.md).

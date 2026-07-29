@@ -8,9 +8,16 @@ environment-driven (`config.EnvironmentConfig`).
 """
 
 from aws_cdk import aws_dynamodb as dynamodb
+from cdk_nag import NagSuppressions
 from constructs import Construct
 
 from config import EnvironmentConfig
+
+_PITR_SUPPRESSION_REASON = (
+    "PITR is environment-driven by design (ADR-018): disabled in dev to avoid cost on "
+    "disposable data, enabled in prod. This is a deliberate config choice, not an "
+    "oversight — see infrastructure/config.py's EnvironmentConfig."
+)
 
 
 class StorageConstruct(Construct):
@@ -45,3 +52,9 @@ class StorageConstruct(Construct):
             ),
             removal_policy=environment_config.removal_policy,
         )
+
+        if not environment_config.enable_point_in_time_recovery:
+            NagSuppressions.add_resource_suppressions(
+                [self.decisions_table, self.idempotency_table],
+                [{"id": "AwsSolutions-DDB3", "reason": _PITR_SUPPRESSION_REASON}],
+            )

@@ -87,12 +87,15 @@ Insights. This doesn't close the gap, but it means the gap is never silent.
 
 ## Layer 7 — Deployment-time security
 
-The CDK deployment role (GitHub OIDC, planned for Phase 8) is intentionally distinct
-from the Lambda's runtime execution role — neither is a superset of the other. A
-compromised runtime role cannot redeploy infrastructure; a compromised deploy role
-(scoped to CI, not to any live request path) cannot serve a live request. Configuration
-changes (`policies/`) require the same deploy path as any other code change — reviewed,
+The CDK deployment role (GitHub OIDC, ADR-025) is intentionally distinct from the
+Lambda's runtime execution role — neither is a superset of the other. A compromised
+runtime role cannot redeploy infrastructure; a compromised deploy role (scoped to CI,
+not to any live request path, and itself only able to assume the CDK bootstrap roles —
+never a broad permission directly) cannot serve a live request. Configuration changes
+(`policies/`) require the same deploy path as any other code change — reviewed,
 version-controlled, no separate unreviewed runtime mutation path exists (ADR-010).
+PR validation and deployment are separate GitHub Actions workflows with disjoint
+triggers (ADR-026), so a fork PR has no path to any deploy credential at all.
 
 ## What this architecture does not claim
 

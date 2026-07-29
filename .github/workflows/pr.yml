@@ -1,0 +1,139 @@
+name: PR validation
+
+# Runs on every pull request, including from forks. Deliberately has no `id-token`
+# permission and requests no AWS credentials anywhere in this file (ADR-026) — a fork
+# PR gets byte-for-byte the same checks as a same-repo PR, with zero ability to reach
+# AWS or repository secrets. Deployment lives entirely in deploy.yml, triggered only by
+# a push to main, never by pull_request.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  quality:
+    name: Lint, format, typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,infra]"
+      - run: ruff check .
+      - run: black --check .
+      - run: mypy .
+
+  test:
+    name: Unit + contract tests (coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov --cov-report=term-missing --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
+
+  test-infra:
+    name: CDK assertion tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: pip install -e ".[dev,infra]"
+      - run: pytest -m infra -q
+
+  iac-security-scan:
+    name: IaC security scan (cdk-nag + cfn-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: pip install -e ".[dev,infra]"
+      - run: npm install -g aws-cdk
+      - name: cdk-nag (AwsSolutionsChecks) — fails on any un-suppressed Error finding
+        working-directory: infrastructure
+        env:
+          CDK_NAG_ENABLED: "true"
+        run: |
+          cdk synth -c env=dev --quiet
+          cdk synth -c env=prod --quiet
+      - name: cfn-lint against the synthesized templates
+        run: |
+          pip install "cfn-lint>=1.0,<2.0"
+          # W3005 ignored everywhere: CDK itself adds a belt-and-suspenders DependsOn
+          # between a Lambda function and its role's policy that's already implied by
+          # the Fn::GetAtt reference — a benign, CDK-generated artifact, not a template
+          # defect. E3030 ignored for GitHubOidc only: CDK's iam.OpenIdConnectProvider
+          # L2 construct auto-generates a custom-resource Lambda pinned to a Node.js
+          # runtime newer than cfn-lint's bundled resource spec currently recognizes —
+          # a cfn-lint schema-currency gap in a CDK-internal resource this project's
+          # code doesn't configure, not a real template defect.
+          cfn-lint --ignore-checks W3005 --template infrastructure/cdk.out/ModelRouter-dev.template.json
+          cfn-lint --ignore-checks W3005 --template infrastructure/cdk.out/ModelRouter-prod.template.json
+          cfn-lint --ignore-checks W3005 E3030 --template infrastructure/cdk.out/GitHubOidc.template.json
+
+  dependency-scan:
+    name: Dependency vulnerability scan (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev,infra]"
+      - run: pip install pip-audit
+      # --skip-editable: this project's own editable install has no PyPI entry to
+      # check against, not a real finding to ignore.
+      #
+      # --ignore-vuln: dev-only tooling advisories with no fix available inside this
+      # project's current major-version pin (black<25, pytest<9) — neither package is
+      # bundled into the deployed Lambda or ever exposed to untrusted input, so these
+      # are a supply-chain/dev-environment tracking item, not a runtime risk. Revisit
+      # (remove the ignore, bump the pin) the next time Dependabot proposes black/
+      # pytest updates (see .github/dependabot.yml) — do not let this list grow stale.
+      - run: |
+          pip-audit --skip-editable \
+            --ignore-vuln PYSEC-2026-2120 \
+            --ignore-vuln PYSEC-2026-2121 \
+            --ignore-vuln PYSEC-2026-1845
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

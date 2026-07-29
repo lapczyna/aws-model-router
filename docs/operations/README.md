@@ -18,3 +18,6 @@ Operational runbooks and alarm-response guides.
   cost abuse) — see `docs/security/threat-model.md` for what's anticipated (Phase 7).
 * [`disaster-recovery.md`](disaster-recovery.md) — recovering from full stack loss, a
   Region-wide Bedrock incident, DynamoDB data loss, or a stuck CDK deployment (Phase 7).
+* [`ci-cd.md`](ci-cd.md) — how the PR/deploy GitHub Actions workflows work, the
+  one-time manual OIDC/Environment setup they depend on, branch-protection
+  recommendations, and rollback guidance (Phase 8).

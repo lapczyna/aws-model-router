@@ -14,6 +14,7 @@ from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
+from cdk_nag import NagSuppressions
 from constructs import Construct
 
 from bundling import lambda_code_bundling_options
@@ -136,4 +137,45 @@ class LambdaConstruct(Construct):
             "ApiFunctionLiveAlias",
             alias_name="live",
             version=self.function.current_version,
+        )
+
+        NagSuppressions.add_resource_suppressions(
+            self.function,
+            [
+                {
+                    "id": "AwsSolutions-L1",
+                    "reason": (
+                        "The Python runtime is intentionally pinned to 3.12, matching "
+                        "pyproject.toml's requires-python constraint — bumping it is a "
+                        "deliberate, tested version-support decision, not an oversight."
+                    ),
+                },
+                {
+                    "id": "AwsSolutions-IAM4",
+                    "reason": (
+                        "AWSLambdaBasicExecutionRole is the standard AWS-managed policy "
+                        "for exactly this purpose (this function's own CloudWatch Logs "
+                        "write access) — narrowly scoped to logs actions already; a "
+                        "hand-rolled equivalent would duplicate what AWS maintains for "
+                        "this common pattern with no real security benefit."
+                    ),
+                    "appliesTo": [
+                        "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/"
+                        "AWSLambdaBasicExecutionRole"
+                    ],
+                },
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": (
+                        "The only Resource::* statement here is X-Ray's "
+                        "PutTraceSegments/PutTelemetryRecords, reviewed and accepted in "
+                        "ADR-022: AWS defines no resource-level permission for either "
+                        "action, so '*' is the only valid value, not a wildcard "
+                        "oversight. Every other permission on this role (DynamoDB, "
+                        "Bedrock) is scoped to specific resource ARNs, not wildcarded."
+                    ),
+                    "appliesTo": ["Resource::*"],
+                },
+            ],
+            apply_to_children=True,
         )
