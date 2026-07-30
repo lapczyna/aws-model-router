@@ -328,7 +328,7 @@ findings resolved. Portfolio section in README.
       ADR-028 and `ExperimentStrategy`, resolved via documentation + a characterization
       test since the behavior was judged correct on inspection, not a bug)
 - [x] Portfolio README section written
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 **Scope note**: the original scope named "10 specific sample demonstrations" and "5
 specific review perspectives" without capturing their exact content anywhere in the
@@ -358,12 +358,12 @@ traffic unvalidated.
 | Phase 6 — Observability, auditability, and cost governance | Complete | `e2a6cd3` |
 | Phase 7 — Security and resilience hardening | Complete | `a9cb141` |
 | Phase 8 — CI/CD with GitHub Actions | Complete | `fc9fe49` |
+| Phase 9 — Performance, load testing, and portfolio polish | Complete | `6063cb4` |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 9 | Performance, load testing, and portfolio polish |
 | 10 | Advanced extensions (optional — explicit request only) |
 
 ## Open assumptions / decisions carried forward
