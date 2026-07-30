@@ -23,6 +23,22 @@ Pricing values in these files must be quoted strings (e.g. `"0.00025"`), not bar
 numbers — see `src/domain/money.py` for why (unquoted YAML numbers parse as a lossy
 binary float, which is rejected at validation time).
 
+## Routing-strategy coverage (Phase 9 sample policy review)
+
+Between them, these three files cover `preferred_model` (no `fallback_policy`
+configured — `default_policy.yaml`), `lowest_cost` (with a `fallback_policy` —
+`support-assistant.yaml`), and `experiment` (`experimental-app.yaml`). Two combinations
+are deliberately *not* represented by a static sample file, since adding them would
+require either changing `default_policy.yaml`'s intentionally single-model, conservative
+scope (see its own comment) or adding a fourth file for illustration alone:
+
+* `preferred_model` **with** a configured `fallback_policy` — see
+  `scripts/run_demo_scenarios.py`'s `demo_fallback`/`demo_health_degradation` (which
+  build their own small in-code policy) and ADR-028 for exactly this combination, since
+  it's the one where a health-excluded preferred model must still fall back correctly.
+* `quality_tier` strategy — see `tests/unit/domain/test_strategy.py` for its unit-level
+  coverage; no sample application currently uses it.
+
 See [`docs/architecture/domain-glossary.md`](../docs/architecture/domain-glossary.md) for
 the domain model these files implement, and
 [ADR-010](../docs/adr/0010-configuration-storage-approach.md) for why static,

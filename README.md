@@ -11,20 +11,55 @@ The initial provider is **Amazon Bedrock**. The architecture is deliberately
 provider-independent so a second provider could be added later through an adapter,
 without changing the routing domain.
 
-> **Status: Phase 8 — CI/CD with GitHub Actions.** GitHub OIDC (no static AWS keys) via
-> a dedicated, least-privilege bootstrap stack; a PR workflow (lint, typecheck, tests,
-> CDK assertion tests, cdk-nag + cfn-lint IaC scanning, dependency and secret scanning)
-> with zero AWS credentials — a fork PR gets identical treatment, by construction, not
-> configuration; a deployment workflow (auto dev, manually-approved prod). Adding
-> cfn-lint caught a genuine, previously-latent bug: a CloudFormation resource type
-> (`AWS::CloudWatch::Dashboard`) doesn't yet accept the `Tags` property CDK's tagging
-> aspect was applying to it. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full
-> phased roadmap.
+> **Status: Phase 9 — Performance, load testing, and portfolio polish.** A higher-
+> concurrency/randomized-fault-injection test suite
+> (`tests/unit/application/test_load_and_fault_injection.py`) found and fixed a real
+> gap: health-based exclusion of the preferred model previously caused total request
+> failure instead of falling back to a healthy alternate
+> ([ADR-028](docs/adr/0028-fallback-chain-considers-health-excluded-candidates.md)).
+> Also added: a routing-latency benchmark, a cost-comparison report across the model
+> catalogue, ten reproducible sample demonstrations
+> ([`docs/demonstrations.md`](docs/demonstrations.md)), five new developer/operator
+> guides ([`docs/guides/`](docs/guides/)), a release process, and a verified final
+> architecture review ([`docs/architecture/final-review.md`](docs/architecture/final-review.md)).
+> See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
 cost control, reliability, observability, security, testability, infrastructure as code,
 and operational maturity.
+
+## Portfolio notes
+
+This project exists to demonstrate how I approach building a real AWS system, not just
+to call a foundation model. If you're reviewing this as a portfolio piece, the fastest
+path in:
+
+* **[`docs/demonstrations.md`](docs/demonstrations.md)** — ten concrete, reproducible
+  demonstrations (routing decisions, fallback, experimentation, idempotency, cost
+  rejection, health degradation, a full HTTP round trip, observability, a security
+  abuse-case test, and CI/CD catching a real bug), each with the exact command to run it
+  yourself, no AWS credentials needed for nine of the ten.
+* **[`docs/architecture/final-review.md`](docs/architecture/final-review.md)** — a
+  verified (not asserted) end-to-end architecture review: what was checked and how,
+  including a real defect the review process itself caught and fixed
+  ([ADR-028](docs/adr/0028-fallback-chain-considers-health-excluded-candidates.md)) —
+  plus known limitations and the future roadmap.
+* **[`PROJECT_PLAN.md`](PROJECT_PLAN.md)** — the phase-by-phase delivery history, if
+  you want to see the incremental process (and the Definitions of Done each phase was
+  held to) rather than just the end state.
+
+What this is meant to show: layered architecture with a genuinely enforced dependency
+direction (verified via `docs/architecture/final-review.md`'s import-graph check, not
+just described), a security threat model with real mitigations and honestly-labeled
+residual risk rather than a checklist, cost governance that ties concrete dollar figures
+to routing decisions (`docs/cost/cost-comparison-report.md`), CI/CD hardened against a
+fork-PR credential leak by construction, and documentation that stays synchronized with
+the code it describes — including this README's own status banner and ADR table, kept
+current as of Phase 9. It is a solo-built reference implementation, not a
+battle-tested production system: `docs/architecture/final-review.md`'s "known,
+documented limitations" section lists what's deliberately deferred and why, rather than
+leaving that discovery to a reviewer.
 
 ## Why a model router?
 
@@ -292,7 +327,10 @@ python scripts/invoke_lambda_locally.py --method POST --resource /v1/inference \
 ```
 
 See [`scripts/invoke_lambda_locally.py`](scripts/invoke_lambda_locally.py)'s docstring
-for real-services mode (against a deployed stack).
+for real-services mode (against a deployed stack). See
+[`docs/demonstrations.md`](docs/demonstrations.md) for nine more scenarios in the same
+spirit — fallback, idempotency, model health degradation, observability, a security
+abuse-case test, and CI/CD catching a real bug.
 
 ## Architecture decisions
 
@@ -327,6 +365,7 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [025](docs/adr/0025-github-oidc-deploy-role-design.md) | GitHub OIDC deploy role design |
 | [026](docs/adr/0026-pr-and-deploy-workflow-separation.md) | PR and deployment workflow separation |
 | [027](docs/adr/0027-iac-security-scanning-approach.md) | IaC security scanning — cdk-nag and cfn-lint |
+| [028](docs/adr/0028-fallback-chain-considers-health-excluded-candidates.md) | Fallback chain must apply even when the strategy selects nothing |
 
 ## Repository structure
 
@@ -338,12 +377,16 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── ISSUE_TEMPLATE/
 │   └── PULL_REQUEST_TEMPLATE.md
 ├── docs/
+│   ├── demonstrations.md    # Ten reproducible sample demonstrations (Phase 9)
 │   ├── adr/                 # Architecture Decision Records
-│   ├── architecture/        # Overview, diagrams, API contracts, domain glossary
+│   ├── architecture/        # Overview, diagrams, API contracts, domain glossary, final review
+│   ├── guides/               # Developer, troubleshooting, policy-authoring, model/application
+│   │                        # onboarding guides (Phase 9)
 │   ├── operations/          # Deployment/teardown, observability, alarm-response, runbook,
-│   │                        # incident-response, disaster-recovery, ci-cd
+│   │                        # incident-response, disaster-recovery, ci-cd, release-process
+│   ├── performance/         # Routing-latency benchmark report (Phase 9)
 │   ├── security/            # Threat model, security architecture, resilience test plan
-│   └── cost/                # Cost estimation & pricing-update guide
+│   └── cost/                # Cost estimation guide & cost-comparison report
 ├── events/                  # Sample HTTP-shape request bodies for invoke_lambda_locally.py
 ├── infrastructure/          # AWS CDK v2 (Python) app
 │   ├── app.py
@@ -353,7 +396,8 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── stacks/               # model_router_stack.py, github_oidc_stack.py
 │   └── cdk_constructs/       # storage (DynamoDB), lambda, api gateway, observability constructs
 ├── policies/                # Version-controlled routing policy & model catalogue configuration
-├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock_live_smoke_test.py
+├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock_live_smoke_test.py,
+│                             # benchmark_routing.py, cost_comparison_report.py, run_demo_scenarios.py
 ├── src/
 │   ├── domain/               # Pure Python domain models, routing strategies, reason codes
 │   ├── application/          # Orchestration: validation → policy → filter → cost → strategy → invoke
@@ -459,8 +503,8 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 5 | AWS CDK infrastructure and serverless API |
 | 6 | Observability, auditability, and cost governance |
 | 7 | Security and resilience hardening |
-| 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) *(this phase)* |
-| 9 | Performance, load testing, and portfolio polish |
+| 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |
+| 9 | Performance, load testing, and portfolio polish *(this phase)* |
 | 10 | Advanced extensions *(optional, explicit request only)* |
 
 ## What this project deliberately does not do

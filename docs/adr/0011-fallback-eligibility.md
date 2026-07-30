@@ -26,9 +26,14 @@ reaches the fallback loop at all, because it is resolved *before* invocation:
 * Validation failure: rejected by `InferenceRequest`'s Pydantic validation, before
   `InvocationOrchestrator.invoke()` does anything.
 * Policy denial / unsupported capability / cost rejection: `RouteEvaluationService`
-  (Phase 2) already excludes ineligible candidates during routing; if no candidate
-  remains, `decision.selected_model_alias` is `None` and `InvocationOrchestrator`
-  returns immediately without attempting any invocation.
+  (Phase 2) already excludes ineligible candidates during routing; if *no* candidate
+  remains eligible at all, `InvocationOrchestrator` returns immediately without
+  attempting any invocation. If `decision.selected_model_alias` is `None` but a
+  configured fallback alias is still eligible (e.g. the strategy's preferred model was
+  itself excluded, but a fallback wasn't), the fallback chain below still applies to
+  that candidate — see ADR-028, added in Phase 9 after fault-injection testing found
+  that the original all-or-nothing framing left a healthy fallback model unused during
+  a sustained health-driven exclusion of the preferred model.
 * Malformed configuration: raises `ConfigurationError` from policy/catalogue resolution,
   propagated unchanged — never caught by the fallback loop's `except ProviderError`.
 * Authorization failure: not yet a domain concept (Phase 5, API Gateway/handler layer);

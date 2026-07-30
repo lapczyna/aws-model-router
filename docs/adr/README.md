@@ -70,3 +70,4 @@ What else was evaluated, and why was it not chosen?
 | [ADR-025](0025-github-oidc-deploy-role-design.md) | GitHub OIDC deploy role design | Accepted |
 | [ADR-026](0026-pr-and-deploy-workflow-separation.md) | PR and deployment workflow separation | Accepted |
 | [ADR-027](0027-iac-security-scanning-approach.md) | IaC security scanning — cdk-nag and cfn-lint | Accepted |
+| [ADR-028](0028-fallback-chain-considers-health-excluded-candidates.md) | Fallback chain must apply even when the strategy selects nothing | Accepted |

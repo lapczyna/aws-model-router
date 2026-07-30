@@ -121,15 +121,15 @@ class InvocationOrchestrator:
 
     def _invoke_uncached(self, request: InferenceRequest) -> InferenceResult:
         decision = self._route_evaluation_service.evaluate(request)
-        if decision.selected_model_alias is None:
+        policy = self._policy_repository.resolve(request.application_id)
+        chain = self._build_candidate_chain(decision, policy.fallback_policy)
+        if not chain:
             result = InferenceResult(decision=decision, response=None, invocation_attempts=())
             self._persist(result)
             self._publish_metrics(result)
             return result
 
-        policy = self._policy_repository.resolve(request.application_id)
         effective = resolve_effective_requirements(request.requirements, policy)
-        chain = self._build_candidate_chain(decision, policy.fallback_policy)
 
         attempts: list[InvocationAttempt] = []
         extra_reason_codes: list[RoutingReasonCode] = []
@@ -199,15 +199,24 @@ class InvocationOrchestrator:
     def _build_candidate_chain(
         decision: RoutingDecision, fallback_policy: FallbackPolicy
     ) -> list[str]:
-        if decision.selected_model_alias is None:  # pragma: no cover - guarded by caller
-            raise AssertionError("_build_candidate_chain requires a selected primary model")
+        """Build the ordered chain of model aliases to attempt.
 
+        Usually starts with the strategy's selected model. But a strategy (e.g.
+        `PreferredModelStrategy`) may deliberately leave `selected_model_alias` unset
+        when its preferred model is ineligible (e.g. excluded by model-health
+        filtering) rather than implicitly choosing a substitute -- that substitution is
+        this method's job. In that case the chain still considers the policy's
+        configured fallback aliases, so a healthy fallback model isn't left unused
+        just because it wasn't anyone's first choice.
+        """
         eligible_aliases = {
             candidate.model_alias
             for candidate in decision.considered_candidates
             if candidate.eligible
         }
-        chain = [decision.selected_model_alias]
+        chain: list[str] = []
+        if decision.selected_model_alias is not None:
+            chain.append(decision.selected_model_alias)
         for alias in fallback_policy.fallback_model_aliases:
             if len(chain) >= fallback_policy.maximum_attempts:
                 break
@@ -232,7 +241,16 @@ class InvocationOrchestrator:
                 if candidate.model_alias == succeeded_alias
             )
 
-        combined_codes = tuple(sort_reason_codes((*original.reason_codes, *extra_reason_codes)))
+        # `_aggregate_decision` is only ever called once `_build_candidate_chain` has
+        # produced a non-empty chain, i.e. at least one eligible candidate was found
+        # and attempted -- so `NO_ELIGIBLE_MODEL` (set when the strategy itself
+        # selected nothing) is stale here even if every attempt in the chain failed.
+        original_codes = tuple(
+            code
+            for code in original.reason_codes
+            if code is not RoutingReasonCode.NO_ELIGIBLE_MODEL
+        )
+        combined_codes = tuple(sort_reason_codes((*original_codes, *extra_reason_codes)))
         return original.model_copy(
             update={
                 "selected_model_alias": succeeded_alias,

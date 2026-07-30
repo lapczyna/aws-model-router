@@ -40,4 +40,33 @@ Developer and operational scripts.
       --body events/support_assistant_balanced.json
   ```
 
-Later phases add: load/fault-injection scripts (Phase 9).
+* [`benchmark_routing.py`](benchmark_routing.py) — times `RouteEvaluationService.evaluate()`
+  in a tight in-process loop (no AWS credentials, no model invocation). See
+  [`docs/performance/routing-benchmark.md`](../docs/performance/routing-benchmark.md) for
+  what this measures, what it deliberately doesn't, and measured results.
+
+  ```bash
+  python scripts/benchmark_routing.py --iterations 3000
+  ```
+
+* [`cost_comparison_report.py`](cost_comparison_report.py) — compares estimated cost
+  across every catalogued model for representative workloads (no AWS credentials, no
+  model invocation). See
+  [`docs/cost/cost-comparison-report.md`](../docs/cost/cost-comparison-report.md) for the
+  full report and what it demonstrates.
+
+  ```bash
+  python scripts/cost_comparison_report.py
+  ```
+
+* [`run_demo_scenarios.py`](run_demo_scenarios.py) — narrated walkthroughs of four
+  scenarios that need scripted behavior rather than a static example file:
+  model-invocation fallback, idempotent duplicate requests, model health degradation, and
+  observability (structured logs + EMF metrics for one request). No AWS credentials
+  required. See [`docs/demonstrations.md`](../docs/demonstrations.md) for all 10 sample
+  demonstrations, including the six with existing dedicated scripts/fixtures.
+
+  ```bash
+  python scripts/run_demo_scenarios.py                      # run all four
+  python scripts/run_demo_scenarios.py --scenario fallback
+  ```

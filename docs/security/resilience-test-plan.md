@@ -21,17 +21,25 @@ once a failure has actually occurred.
 | Bedrock throttling/timeout/malformed response | `tests/unit/adapters/bedrock/test_retry.py`, `test_bedrock_model_provider.py` (via `botocore.stub.Stubber`) | The provider adapter's own retry/backoff and error classification, independent of the orchestrator |
 | Model health degradation | `tests/unit/adapters/memory/test_in_memory_model_health_repository.py`, `tests/unit/domain/test_filtering.py` | Consecutive failures correctly transition `HEALTHY → DEGRADED → UNAVAILABLE` and affect (or don't) eligibility |
 | Adversarial/malformed input | `tests/unit/handlers/test_abuse_cases.py` (Phase 7) | Oversized/malformed bodies, unrecognized fields, and adversarial path parameters all degrade to a clean 4xx, never a 500 or data leak |
+| High-concurrency idempotency correctness (50 threads, same key) | `test_fifty_concurrent_duplicate_requests_only_invoke_model_once` (`tests/unit/application/test_load_and_fault_injection.py`) | The single-invocation guarantee holds at higher concurrency than the original 2-thread test, not just in principle |
+| Randomized fault injection, sequential (200 requests, seeded random failure rates per model) | `test_two_hundred_sequential_requests_under_random_faults_never_exceed_fallback_bound` | Fallback attempt counts stay bounded by `maximum_attempts` and both fallback-used and clean-success outcomes occur, across many independent decisions, not just one hand-picked scenario |
+| Randomized fault injection, concurrent (100 requests, 20 worker threads) | `test_concurrent_requests_under_random_faults_never_raise_unexpectedly` | No uncaught exceptions or attempt-count violations under genuine concurrent load with randomized failures |
+| Sustained single-model incident (health-based exclusion) | `test_sustained_primary_failures_eventually_stop_being_attempted_at_all`, `test_fallback_used_when_preferred_model_is_excluded_by_health_before_selection` (`test_invocation_orchestrator.py`) | Once a model is marked `UNAVAILABLE`, later requests skip it entirely (no wasted invocation) **and** still recover via a healthy configured fallback model — see ADR-028 for a real gap this testing found and fixed: before the fix, health-based exclusion of the preferred model caused total request failure even with a healthy fallback available |
+| Throughput sanity (500 sequential requests) | `test_five_hundred_sequential_requests_complete_in_a_generous_time_bound` | Catches a gross performance regression (e.g. accidental O(n²) behavior); not a precise benchmark — see `docs/performance/` for that |
 
 Every row above is a real, executed test — not aspirational. Run
 `python -m pytest tests/unit/application tests/unit/adapters/bedrock tests/unit/handlers -q`
 to re-verify all of them together.
 
-## Deliberately not yet covered (Phase 9 scope)
+## Deliberately not yet covered (requires a real deployed stack)
 
-* **Load testing** (sustained concurrent traffic against a real deployed stack) — this
-  project's unit tests exercise fallback/idempotency logic deterministically with fake
-  providers; they do not measure real Lambda cold-start distribution, real API Gateway
-  throttling behavior under load, or real DynamoDB capacity behavior at scale.
+* **Load testing against a real deployed stack** (sustained concurrent traffic hitting
+  actual API Gateway/Lambda/DynamoDB) — the in-process concurrency and fault-injection
+  tests above prove the routing/fallback/idempotency *logic* holds under genuine thread
+  concurrency and randomized failures; they do not measure real Lambda cold-start
+  distribution, real API Gateway throttling behavior under load, or real DynamoDB
+  capacity behavior at scale. That requires an actual `cdk deploy`, which remains the
+  user's action, not something this project performs on its own.
 * **Fault injection against a live deployment** (e.g. actually throttling a real Bedrock
   model, or killing a Lambda execution environment mid-request) — everything above is
   simulated via fakes/stubs; a live fault-injection exercise against a deployed `dev`
@@ -40,7 +48,7 @@ to re-verify all of them together.
 * **Multi-Region failover drill** — contingent on adopting cross-Region inference
   profiles (ADR-023), not yet built.
 
-These are explicitly deferred to Phase 9 ("load testing, fault injection") per
-`PROJECT_PLAN.md`, not silently skipped — Phase 7's resilience scope is the
-already-tested unit-level failure-mode coverage above, which is real and complete for
-what a credential-free, deterministic test suite can prove.
+These remain genuinely deferred — they require a live AWS deployment this project does
+not perform on its own — not silently skipped. Everything achievable without one is now
+covered above, including higher-concurrency and randomized-fault-injection scenarios
+added in Phase 9 (`tests/unit/application/test_load_and_fault_injection.py`).

@@ -123,6 +123,17 @@ class ExperimentStrategy:
     *not* silently reassign to a different arm — that would contaminate the experiment's
     statistical validity. It returns no selection, same as any other strategy exhausting
     its eligible set.
+
+    Note (added Phase 9, ADR-028): this guarantee is about *this strategy's own*
+    behavior, not the orchestrator's separate fallback mechanism. If a policy combines
+    `routing_strategy: experiment` with a non-empty `fallback_policy`, and the assigned
+    arm becomes ineligible (e.g. health-excluded), `InvocationOrchestrator` can still
+    invoke a configured fallback model instead — but never silently: `fallback_used` and
+    `FALLBACK_SELECTED` are always set on the resulting decision, so experiment analysis
+    that requires strict arm purity should filter on `fallback_used`, the same as any
+    other auditable substitution in this system. No shipped sample policy currently
+    combines `experiment` with a configured `fallback_policy` (`experimental-app.yaml`
+    has none).
     """
 
     def select(

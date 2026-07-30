@@ -21,3 +21,6 @@ Operational runbooks and alarm-response guides.
 * [`ci-cd.md`](ci-cd.md) — how the PR/deploy GitHub Actions workflows work, the
   one-time manual OIDC/Environment setup they depend on, branch-protection
   recommendations, and rollback guidance (Phase 8).
+* [`release-process.md`](release-process.md) — versioning, cutting a tagged release,
+  generating release notes from Conventional Commits, and how rollback ties into
+  redeploying a specific tagged ref via `ci-cd.md` (Phase 9).

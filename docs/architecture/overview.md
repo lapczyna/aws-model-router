@@ -297,4 +297,6 @@ Key trust decisions this diagram encodes:
 * [`docs/architecture/api-contracts.md`](api-contracts.md) — API request/response contracts
 * [`docs/architecture/domain-glossary.md`](domain-glossary.md) — domain model glossary
 * [`docs/adr/`](../adr/) — architecture decision records
+* [`docs/architecture/final-review.md`](final-review.md) — Phase 9's verified
+  end-to-end architecture review, known limitations, and future roadmap
 * [`PROJECT_PLAN.md`](../../PROJECT_PLAN.md) — phased delivery plan

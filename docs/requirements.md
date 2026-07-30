@@ -64,6 +64,14 @@ malformed configuration.
 FR-4.3. Retries and fallback attempts are bounded (maximum attempts, retry budget) to
 prevent retry/cost amplification.
 
+FR-4.4. Fallback also applies when the preferred model is excluded *before* invocation
+is attempted (e.g. by sustained model-health degradation), not only when it fails
+*during* invocation — an eligible, policy-approved fallback model must still be tried in
+either case (see
+[ADR-028](adr/0028-fallback-chain-considers-health-excluded-candidates.md), added in
+Phase 9 after fault-injection testing found the original implementation only covered the
+invocation-time-failure case).
+
 ### FR-5 — Experimentation
 
 FR-5.1. The router supports deterministic, weighted experiment routing: a stable subject

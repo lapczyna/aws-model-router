@@ -401,6 +401,99 @@ def test_no_eligible_model_returns_early_without_any_invocation() -> None:
     assert provider.calls == []
 
 
+def test_fallback_used_when_preferred_model_is_excluded_by_health_before_selection() -> None:
+    """Regression test: `PreferredModelStrategy` deliberately leaves
+    `selected_model_alias` unset when the preferred model is ineligible (e.g.
+    health-excluded) rather than implicitly substituting -- but the orchestrator's
+    fallback chain must still pick up a healthy, policy-approved fallback model in that
+    case. Before this fix, `_invoke_uncached` short-circuited on `selected_model_alias
+    is None` and never even considered the fallback chain, so a sustained primary
+    incident caused total request failure despite a healthy fallback model being
+    available -- defeating the point of tracking model health at all.
+    """
+    from adapters.memory.in_memory_model_health_repository import InMemoryModelHealthRepository
+
+    primary = make_model("primary", capability_tags=("balanced-text",))
+    fallback = make_model("fallback", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_model_aliases=("primary", "fallback"),
+        preferred_model_alias="primary",
+        fallback_policy=FallbackPolicy(fallback_model_aliases=("fallback",), maximum_attempts=2),
+    )
+    provider = FakeModelProvider({"fallback": [_response("fallback")]})
+    health_repository = InMemoryModelHealthRepository(degraded_after=2, unavailable_after=3)
+    for _ in range(3):
+        health_repository.record_outcome("primary", InvocationAttemptStatus.THROTTLED)
+    assert health_repository.get_health("primary") is ModelHealthStatus.UNAVAILABLE
+
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([primary, fallback]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        model_health_repository=health_repository,
+    )
+
+    result = orchestrator.invoke(_request())
+
+    assert provider.calls == ["fallback"]  # primary is never even attempted
+    assert result.response is not None
+    assert result.decision.selected_model_alias == "fallback"
+    assert result.decision.fallback_used is True
+    assert RoutingReasonCode.NO_ELIGIBLE_MODEL not in result.decision.reason_codes
+
+
+def test_fallback_can_replace_a_health_excluded_experiment_arm_but_marks_it_auditable() -> None:
+    """Characterization test (found during Phase 9's multi-perspective self-review, not
+    the original fault-injection pass): the ADR-028 fix applies uniformly regardless of
+    routing strategy, so a policy combining `routing_strategy: experiment` with a
+    configured `fallback_policy` can have its assigned arm replaced by a fallback model
+    if that arm becomes health-excluded -- exactly the substitution
+    `ExperimentStrategy`'s own docstring says the *strategy* never performs itself. This
+    is accepted, not a bug, because it is never silent end-to-end: `fallback_used` and
+    `FALLBACK_SELECTED` are always set, so experiment analysis requiring strict arm
+    purity can filter on `fallback_used`. See ADR-028's "Interaction with
+    ExperimentStrategy".
+    """
+    from adapters.memory.in_memory_model_health_repository import InMemoryModelHealthRepository
+    from domain.experiment import ExperimentArm, ExperimentPolicy
+
+    primary = make_model("primary", capability_tags=("balanced-text",))
+    fallback = make_model("fallback", capability_tags=("balanced-text",))
+    # "demo-app" + "conv-1" deterministically assigns to "primary" at these weights.
+    experiment_policy = ExperimentPolicy(
+        experiment_id="exp1",
+        arms=(
+            ExperimentArm(model_alias="primary", weight=70),
+            ExperimentArm(model_alias="fallback", weight=30),
+        ),
+    )
+    policy = make_policy(
+        allowed_model_aliases=("primary", "fallback"),
+        routing_strategy="experiment",
+        experiment_policy=experiment_policy,
+        fallback_policy=FallbackPolicy(fallback_model_aliases=("fallback",), maximum_attempts=2),
+    )
+    provider = FakeModelProvider({"fallback": [_response("fallback")]})
+    health_repository = InMemoryModelHealthRepository(degraded_after=2, unavailable_after=3)
+    for _ in range(3):
+        health_repository.record_outcome("primary", InvocationAttemptStatus.THROTTLED)
+    assert health_repository.get_health("primary") is ModelHealthStatus.UNAVAILABLE
+
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([primary, fallback]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        model_health_repository=health_repository,
+    )
+
+    result = orchestrator.invoke(_request(application_id="demo-app", conversation_id="conv-1"))
+
+    assert provider.calls == ["fallback"]  # the assigned "primary" arm is never attempted
+    assert result.decision.selected_model_alias == "fallback"
+    assert result.decision.fallback_used is True
+    assert RoutingReasonCode.FALLBACK_SELECTED in result.decision.reason_codes
+
+
 def test_repeated_idempotent_request_returns_cached_result_without_reinvoking() -> None:
     model = make_model("model-a", capability_tags=("balanced-text",))
     policy = make_policy(

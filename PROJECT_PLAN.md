@@ -316,12 +316,25 @@ in scope. Full repository self-review from 5 stated perspectives with high-prior
 findings resolved. Portfolio section in README.
 
 **DoD:**
-- [ ] All 10 sample demonstrations reproducible via committed scripts/fixtures
-- [ ] Load/fault-injection tests exist and pass
-- [ ] Multi-perspective review completed; high-priority findings resolved or explicitly
-      deferred with rationale
-- [ ] Portfolio README section written
+- [x] All 10 sample demonstrations reproducible via committed scripts/fixtures
+      (`docs/demonstrations.md`; every command in it verified to actually run)
+- [x] Load/fault-injection tests exist and pass
+      (`tests/unit/application/test_load_and_fault_injection.py`) — found and fixed a
+      real gap (ADR-028: health-excluded preferred model previously caused total
+      failure instead of falling back to a healthy alternate)
+- [x] Multi-perspective review completed; high-priority findings resolved or explicitly
+      deferred with rationale (`docs/architecture/final-review.md`'s "Multi-perspective
+      self-review" — the reliability lens found a second, subtler interaction between
+      ADR-028 and `ExperimentStrategy`, resolved via documentation + a characterization
+      test since the behavior was judged correct on inspection, not a bug)
+- [x] Portfolio README section written
 - [ ] Committed and pushed
+
+**Scope note**: the original scope named "10 specific sample demonstrations" and "5
+specific review perspectives" without capturing their exact content anywhere in the
+repo. Resolved via explicit user confirmation to propose a reasonable set rather than
+guess — see `docs/demonstrations.md` for the ten shipped, and the multi-perspective
+review below for the five used.
 
 ### Phase 10 — Advanced extensions (optional, not started unless explicitly requested)
 Bedrock Intelligent Prompt Router as an eligible route target, multi-provider routing,
