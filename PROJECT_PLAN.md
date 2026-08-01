@@ -380,7 +380,7 @@ rotate-in-place API for Secrets Manager's native rotation to call.
       clean, regression test for the ARN-scoping fix
 - [x] Threat model updated (new Boundary 6, T23/T24); incident-response and
       release-process docs updated with real procedures, not just a note
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 ## Completed milestones
 
@@ -395,7 +395,7 @@ rotate-in-place API for Secrets Manager's native rotation to call.
 | Phase 7 — Security and resilience hardening | Complete | `a9cb141` |
 | Phase 8 — CI/CD with GitHub Actions | Complete | `fc9fe49` |
 | Phase 9 — Performance, load testing, and portfolio polish | Complete | `6063cb4` |
-| Phase 10a — Multi-provider routing (OpenAI) | Complete | *(pending commit)* |
+| Phase 10a — Multi-provider routing (OpenAI) | Complete | `f0e9a00` |
 
 ## Remaining milestones
 
