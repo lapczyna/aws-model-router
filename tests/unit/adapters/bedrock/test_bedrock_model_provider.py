@@ -15,7 +15,7 @@ import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError
 
 from adapters.bedrock.bedrock_model_provider import BedrockModelProvider
-from adapters.bedrock.retry import RetryPolicy
+from adapters.common.retry import RetryPolicy
 from domain.enums import ProviderErrorCategory, Role
 from domain.errors import ProviderError
 from domain.messages import Message

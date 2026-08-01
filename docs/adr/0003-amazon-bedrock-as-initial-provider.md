@@ -22,8 +22,9 @@ adapter that implements the provider-independent `ModelProvider` interface (ADR-
 * The project inherits Bedrock's regional availability and per-model feature variance
   (not every model supports every Converse feature) — this is why `ModelCapabilities` is
   explicit per model (ADR-002) rather than assumed uniform.
-* Multi-provider support is deferred; it is architecturally possible (ADR-002) but not
-  built or tested in this project unless a later phase explicitly adds it.
+* Multi-provider support was deferred at the time this ADR was written; it is
+  architecturally possible (ADR-002) and was built and tested starting Phase 10a, once
+  explicitly requested — see [ADR-029](0029-multi-provider-routing-openai.md).
 
 ## Alternatives considered
 * **Multiple providers from day one** (e.g. Bedrock + a direct OpenAI/Anthropic API

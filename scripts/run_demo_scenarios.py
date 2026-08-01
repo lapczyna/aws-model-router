@@ -1,19 +1,21 @@
 #!/usr/bin/env python
-"""Run the four Phase 9 demo scenarios that need a scripted, narrated walkthrough rather
-than a single static example file: model-invocation fallback, idempotent duplicate
-requests, model health degradation, and observability (structured logs + EMF metrics for
-one request). No AWS credentials required -- everything here uses in-process fakes, the
-same pattern as `tests/unit/application/test_invocation_orchestrator.py`.
+"""Run the demo scenarios that need a scripted, narrated walkthrough rather than a
+single static example file: model-invocation fallback, idempotent duplicate requests,
+model health degradation, observability (structured logs + EMF metrics for one
+request), and cross-provider fallback (Phase 10a). No AWS credentials required --
+everything here uses in-process fakes, the same pattern as
+`tests/unit/application/test_invocation_orchestrator.py`.
 
-See `docs/demonstrations.md` for all 10 sample demonstrations, including the six that
+See `docs/demonstrations.md` for all sample demonstrations, including the ones that
 already have a dedicated existing script/fixture and don't need a new one here.
 
 Usage:
-    python scripts/run_demo_scenarios.py                      # run all four
+    python scripts/run_demo_scenarios.py                      # run all scenarios
     python scripts/run_demo_scenarios.py --scenario fallback
     python scripts/run_demo_scenarios.py --scenario idempotency
     python scripts/run_demo_scenarios.py --scenario health-degradation
     python scripts/run_demo_scenarios.py --scenario observability
+    python scripts/run_demo_scenarios.py --scenario multi-provider-fallback
 """
 
 import argparse
@@ -23,6 +25,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from adapters.composite_model_provider import CompositeModelProvider
 from adapters.memory.in_memory_decision_repository import InMemoryRoutingDecisionRepository
 from adapters.memory.in_memory_idempotency_store import InMemoryIdempotencyStore
 from adapters.memory.in_memory_model_health_repository import InMemoryModelHealthRepository
@@ -92,10 +95,10 @@ class _InMemoryRoutingPolicyRepository:
         raise RoutingPolicyNotFoundError(f"No routing policy found for '{application_id}'")
 
 
-def _make_model(model_alias: str) -> ModelDefinition:
+def _make_model(model_alias: str, provider: ProviderName = ProviderName.BEDROCK) -> ModelDefinition:
     return ModelDefinition(
         model_alias=model_alias,
-        provider=ProviderName.BEDROCK,
+        provider=provider,
         region="us-east-1",
         resolution=ModelResolution(
             type=ModelResolutionType.DIRECT_MODEL_ID, value=f"fake.{model_alias}-v1:0"
@@ -122,10 +125,12 @@ def _banner(title: str) -> None:
     print(f"\n{'=' * 70}\n{title}\n{'=' * 70}")
 
 
-def _response(model_alias: str, text: str = "ok") -> ProviderResponse:
+def _response(
+    model_alias: str, text: str = "ok", provider: ProviderName = ProviderName.BEDROCK
+) -> ProviderResponse:
     return ProviderResponse(
         model_alias=model_alias,
-        provider=ProviderName.BEDROCK,
+        provider=provider,
         message=Message(role=Role.ASSISTANT, content=text),
         stop_reason=StopReason.END_TURN,
         usage=Usage(input_tokens=5, output_tokens=5),
@@ -321,11 +326,79 @@ def demo_observability() -> None:
     print("   ADR-019, and docs/operations/observability.md.")
 
 
+class _BedrockFailsOpenAiSucceedsProvider:
+    """A fake `CompositeModelProvider` sub-provider stand-in: fails whatever it's asked
+    to invoke. Paired with `_CountingSuccessProvider` under a real
+    `CompositeModelProvider`, dispatched to by `model.provider` -- this exercises the
+    actual dispatch logic (ADR-029), not just two fakes called directly."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def invoke(self, request: Any) -> ProviderResponse:
+        self.calls.append(request.model_alias)
+        raise ProviderError(
+            "simulated Bedrock throttling", category=ProviderErrorCategory.THROTTLED
+        )
+
+
+def demo_multi_provider_fallback() -> None:
+    _banner("Demo: cross-provider fallback (Bedrock primary, OpenAI fallback)")
+    bedrock_model = _make_model("bedrock-primary", provider=ProviderName.BEDROCK)
+    openai_model = _make_model("openai-fallback", provider=ProviderName.OPENAI)
+    catalogue = _InMemoryModelCatalogue([bedrock_model, openai_model])
+    policy = _demo_policy(
+        allowed_model_aliases=("bedrock-primary", "openai-fallback"),
+        preferred_model_alias="bedrock-primary",
+        fallback_policy=FallbackPolicy(
+            fallback_model_aliases=("openai-fallback",), maximum_attempts=2
+        ),
+    )
+    policy_repository = _InMemoryRoutingPolicyRepository(default_policy=policy)
+    clock = SystemClock()
+    route_service = RouteEvaluationService(
+        policy_repository=policy_repository,
+        model_catalogue=catalogue,
+        token_estimator=DefaultTokenEstimator(),
+        cost_estimator=DefaultCostEstimator(),
+        clock=clock,
+        identifier_generator=Uuid4IdentifierGenerator(),
+    )
+    bedrock_provider = _BedrockFailsOpenAiSucceedsProvider()
+    openai_provider = _CountingSuccessProvider()
+    composite = CompositeModelProvider(
+        model_catalogue=catalogue,
+        providers={ProviderName.BEDROCK: bedrock_provider, ProviderName.OPENAI: openai_provider},
+    )
+    orchestrator = InvocationOrchestrator(
+        route_evaluation_service=route_service,
+        policy_repository=policy_repository,
+        model_provider=composite,
+        clock=clock,
+        identifier_generator=Uuid4IdentifierGenerator(),
+    )
+
+    result = orchestrator.invoke(_request())
+
+    print(f"Bedrock sub-provider was called with: {bedrock_provider.calls}")
+    print(f"OpenAI sub-provider was called with:  {openai_provider.calls}")
+    print(f"Final selected model: {result.decision.selected_model_alias}")
+    print(f"fallback_used: {result.decision.fallback_used}")
+    assert bedrock_provider.calls == ["bedrock-primary"]
+    assert openai_provider.calls == ["openai-fallback"]
+    assert result.decision.selected_model_alias == "openai-fallback"
+    print("\n-> A single fallback chain spanned two different providers.")
+    print("   CompositeModelProvider dispatched each attempt to the correct adapter")
+    print("   based on the catalogued model's `provider` field, and neither provider")
+    print("   adapter had any awareness the other exists. See ADR-002 and ADR-029.")
+
+
 _SCENARIOS = {
     "fallback": demo_fallback,
     "idempotency": demo_idempotency,
     "health-degradation": demo_health_degradation,
     "observability": demo_observability,
+    "multi-provider-fallback": demo_multi_provider_fallback,
 }
 
 

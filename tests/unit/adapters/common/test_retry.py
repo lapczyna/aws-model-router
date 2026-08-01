@@ -1,6 +1,6 @@
 import pytest
 
-from adapters.bedrock.retry import RetryPolicy, compute_backoff_delay
+from adapters.common.retry import RetryPolicy, compute_backoff_delay
 
 pytestmark = pytest.mark.unit
 

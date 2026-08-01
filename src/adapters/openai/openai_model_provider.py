@@ -1,10 +1,12 @@
-"""`BedrockModelProvider`: the `ModelProvider` implementation for Amazon Bedrock.
+"""`OpenAIModelProvider`: the `ModelProvider` implementation for OpenAI (ADR-029).
 
 Resolves a logical model alias against the `ModelCatalogue` (never accepting a raw
 provider model ID from a caller — ADR-006), validates the request against that model's
-declared capabilities, invokes it via the Converse API, and classifies any failure into
-`domain.enums.ProviderErrorCategory` so callers never need to know about boto3/botocore
-exception types.
+declared capabilities, invokes it via the Chat Completions API, and classifies any
+failure into `domain.enums.ProviderErrorCategory` so callers never need to know about
+`openai` SDK exception types. Mirrors `adapters.bedrock.BedrockModelProvider`'s shape
+exactly — same shared retry/resolution helpers (`adapters.common`), same control flow —
+so the two adapters are trivially comparable side by side.
 """
 
 from __future__ import annotations
@@ -14,23 +16,27 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from botocore.exceptions import BotoCoreError, ClientError
+import openai
 
-from adapters.bedrock.converse_mapper import build_converse_request, parse_converse_response
-from adapters.bedrock.error_mapping import classify_provider_exception, safe_message_for
+from adapters.common.error_messages import safe_message_for
 from adapters.common.model_resolution import (
     check_capabilities,
     resolve_model,
     resolve_target_model_id,
 )
 from adapters.common.retry import RetryPolicy, compute_backoff_delay
+from adapters.openai.chat_completions_mapper import (
+    build_chat_completion_request,
+    parse_chat_completion_response,
+)
+from adapters.openai.error_mapping import classify_provider_exception
 from domain.enums import ProviderErrorCategory
 from domain.errors import ProviderError
 from domain.ports import ModelCatalogue
 from domain.provider import ProviderRequest, ProviderResponse
 
 if TYPE_CHECKING:
-    from mypy_boto3_bedrock_runtime.client import BedrockRuntimeClient
+    from openai import OpenAI
 
 _RETRYABLE_CATEGORIES = frozenset(
     {
@@ -41,10 +47,10 @@ _RETRYABLE_CATEGORIES = frozenset(
 )
 
 
-class BedrockModelProvider:
+class OpenAIModelProvider:
     def __init__(
         self,
-        client: BedrockRuntimeClient,
+        client: OpenAI,
         model_catalogue: ModelCatalogue,
         retry_policy: RetryPolicy | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -59,15 +65,15 @@ class BedrockModelProvider:
     def invoke(self, request: ProviderRequest) -> ProviderResponse:
         model = resolve_model(request.model_alias, self._model_catalogue)
         check_capabilities(request, model)
-        target_model_id = resolve_target_model_id(model, self._model_catalogue)
-        payload = build_converse_request(request, target_model_id)
+        target_model = resolve_target_model_id(model, self._model_catalogue)
+        payload = build_chat_completion_request(request, target_model)
 
         attempt = 0
         while True:
             attempt += 1
             try:
-                raw_response = self._client.converse(**payload)
-            except (ClientError, BotoCoreError) as exc:
+                raw_response = self._client.chat.completions.create(**payload)
+            except openai.OpenAIError as exc:
                 category = classify_provider_exception(exc)
                 if (
                     category not in _RETRYABLE_CATEGORIES
@@ -78,4 +84,4 @@ class BedrockModelProvider:
                 self._sleep(delay)
                 continue
 
-            return parse_converse_response(raw_response, request.model_alias, model.provider)
+            return parse_chat_completion_response(raw_response, request.model_alias, model.provider)

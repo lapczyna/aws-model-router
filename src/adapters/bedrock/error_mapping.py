@@ -8,26 +8,16 @@ blindly", `docs/requirements.md`).
 
 from botocore.exceptions import BotoCoreError, ClientError, ConnectTimeoutError, ReadTimeoutError
 
+from adapters.common.error_messages import safe_message_for
 from domain.enums import ProviderErrorCategory
+
+__all__ = ["classify_client_error", "classify_provider_exception", "safe_message_for"]
 
 _THROTTLED_CODES = frozenset({"ThrottlingException", "TooManyRequestsException"})
 _TIMEOUT_CODES = frozenset({"ModelTimeoutException"})
 _TRANSIENT_CODES = frozenset(
     {"ServiceUnavailableException", "InternalServerException", "ModelNotReadyException"}
 )
-
-_SAFE_MESSAGES: dict[ProviderErrorCategory, str] = {
-    ProviderErrorCategory.THROTTLED: "The model provider throttled this request.",
-    ProviderErrorCategory.TRANSIENT: "The model provider returned a transient error.",
-    ProviderErrorCategory.TIMEOUT: "The model provider timed out.",
-    ProviderErrorCategory.PERMANENT: "The model provider rejected this request.",
-}
-
-
-def safe_message_for(category: ProviderErrorCategory) -> str:
-    """A fixed, safe message for a category — never derived from the provider's own
-    exception text, which could echo request details."""
-    return _SAFE_MESSAGES[category]
 
 
 def classify_client_error(exc: ClientError) -> ProviderErrorCategory:

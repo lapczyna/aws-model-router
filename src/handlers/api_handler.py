@@ -21,19 +21,23 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+import openai
 from pydantic import ValidationError
 
 from adapters.bedrock.bedrock_model_provider import BedrockModelProvider
+from adapters.composite_model_provider import CompositeModelProvider
 from adapters.config.local_model_catalogue import LocalFileModelCatalogue
 from adapters.config.local_policy_repository import LocalFileRoutingPolicyRepository
 from adapters.dynamodb.dynamodb_decision_repository import DynamoDbRoutingDecisionRepository
 from adapters.dynamodb.dynamodb_idempotency_store import DynamoDbIdempotencyStore
 from adapters.memory.in_memory_model_health_repository import InMemoryModelHealthRepository
 from adapters.metrics.emf_metrics_publisher import EmfMetricsPublisher
+from adapters.openai.openai_model_provider import OpenAIModelProvider
 from application.invocation_orchestrator import InvocationOrchestrator
 from application.route_evaluation_service import RouteEvaluationService
 from domain.cost_estimation import DefaultCostEstimator, DefaultTokenEstimator
-from domain.ports import ModelCatalogue, RoutingDecisionRepository
+from domain.enums import ProviderName
+from domain.ports import ModelCatalogue, ModelProvider, RoutingDecisionRepository
 from handlers.error_mapping import (
     error_response_body,
     map_exception_to_status_and_body,
@@ -93,7 +97,21 @@ def build_services() -> HandlerServices:
     )
 
     bedrock_client = boto3.client("bedrock-runtime", region_name=region)
-    model_provider = BedrockModelProvider(client=bedrock_client, model_catalogue=catalogue)
+    providers: dict[ProviderName, ModelProvider] = {
+        ProviderName.BEDROCK: BedrockModelProvider(client=bedrock_client, model_catalogue=catalogue)
+    }
+    openai_secret_arn = os.environ.get("OPENAI_API_KEY_SECRET_ARN")
+    if openai_secret_arn:
+        # Only present when `policies/model_catalogue.yaml` declares an `openai` model
+        # (`infrastructure/cdk_constructs/lambda_construct.py` provisions the secret and
+        # this env var conditionally — ADR-029). Fetched once per cold start, not per
+        # request, the same lifecycle as every other service built here.
+        secrets_client = boto3.client("secretsmanager", region_name=region)
+        api_key = secrets_client.get_secret_value(SecretId=openai_secret_arn)["SecretString"]
+        providers[ProviderName.OPENAI] = OpenAIModelProvider(
+            client=openai.OpenAI(api_key=api_key), model_catalogue=catalogue
+        )
+    model_provider = CompositeModelProvider(model_catalogue=catalogue, providers=providers)
 
     dynamodb = boto3.resource("dynamodb", region_name=region)
     decision_repository = DynamoDbRoutingDecisionRepository(

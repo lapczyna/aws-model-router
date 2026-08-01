@@ -337,14 +337,50 @@ guess — see `docs/demonstrations.md` for the ten shipped, and the multi-perspe
 review below for the five used.
 
 ### Phase 10 — Advanced extensions (optional, not started unless explicitly requested)
-Bedrock Intelligent Prompt Router as an eligible route target, multi-provider routing,
-streaming, tool-use/multimodal routing, quality feedback collection, offline evaluation,
-contextual bandits, policy simulation, shadow routing, canary rollout, automatic health
-scoring, EventBridge decision events, Step Functions approval flow, multi-account/tenant
-isolation, OpenTelemetry, LLM eval platform integration, prompt caching policy,
-quota-aware routing, carbon-aware routing research, governance evidence export. Any
-adaptive/learning-based routing must start in shadow mode and never control production
-traffic unvalidated.
+An unscoped grab-bag, not a single deliverable: Bedrock Intelligent Prompt Router as an
+eligible route target, multi-provider routing, streaming, tool-use/multimodal routing,
+quality feedback collection, offline evaluation, contextual bandits, policy simulation,
+shadow routing, canary rollout, automatic health scoring, EventBridge decision events,
+Step Functions approval flow, multi-account/tenant isolation, OpenTelemetry, LLM eval
+platform integration, prompt caching policy, quota-aware routing, carbon-aware routing
+research, governance evidence export. Any adaptive/learning-based routing must start in
+shadow mode and never control production traffic unvalidated. Each item is scoped as its
+own lettered sub-phase (10a, 10b, ...) only once explicitly requested — never bundled or
+assumed.
+
+#### Phase 10a — Multi-provider routing (OpenAI) — Complete
+Requested explicitly (asked which Phase 10 item to start with; user chose multi-provider
+routing). `OpenAIModelProvider` (`src/adapters/openai/`) as a real second
+`domain.ports.ModelProvider`, dispatched to by a new `CompositeModelProvider` based on
+each catalogued model's `provider` field — proving ADR-002's provider-independence claim
+with a genuinely independent, non-AWS vendor, not just a second Bedrock model family. See
+[ADR-029](docs/adr/0029-multi-provider-routing-openai.md) for the full design.
+
+Along the way: extracted `adapters/common/` (retry, model resolution, safe error
+messages) so both providers share identical non-wire-format logic instead of
+duplicating it; added catalogue/policy validation preventing a non-Bedrock provider from
+using a Bedrock-specific resolution type or a `router_alias` crossing providers; found
+and fixed a real, previously-latent bug where `_load_bedrock_resource_arns` would have
+built a meaningless Bedrock ARN for a non-Bedrock catalogue entry; added a
+conditionally-provisioned Secrets Manager secret (only if the catalogue actually
+declares an `openai` model) with least-privilege `secretsmanager:GetSecretValue`; added
+a new threat-model trust boundary (T23/T24 — the first time a request can leave AWS
+entirely) with a documented manual-rotation procedure, since OpenAI has no
+rotate-in-place API for Secrets Manager's native rotation to call.
+
+**DoD:**
+- [x] `OpenAIModelProvider` implements `domain.ports.ModelProvider`, tested against real
+      `openai` SDK response/exception types (not just raw dicts)
+- [x] `CompositeModelProvider` dispatches correctly; zero changes to `src/domain/` or
+      `src/application/` (the actual ADR-002 claim, verified not just asserted)
+- [x] A real, working cross-provider example ships:
+      `policies/applications/multi-provider-demo.yaml` +
+      `scripts/run_demo_scenarios.py --scenario multi-provider-fallback`
+- [x] CDK infra: conditional Secrets Manager secret, scoped IAM grant, cdk-nag/cfn-lint
+      clean, regression test for the ARN-scoping fix
+- [x] Threat model updated (new Boundary 6, T23/T24); incident-response and
+      release-process docs updated with real procedures, not just a note
+- [ ] Committed and pushed
 
 ## Completed milestones
 
@@ -359,12 +395,13 @@ traffic unvalidated.
 | Phase 7 — Security and resilience hardening | Complete | `a9cb141` |
 | Phase 8 — CI/CD with GitHub Actions | Complete | `fc9fe49` |
 | Phase 9 — Performance, load testing, and portfolio polish | Complete | `6063cb4` |
+| Phase 10a — Multi-provider routing (OpenAI) | Complete | *(pending commit)* |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 10 | Advanced extensions (optional — explicit request only) |
+| 10b+ | Any other Phase 10 item (optional — explicit request only per item; none scoped yet) |
 
 ## Open assumptions / decisions carried forward
 

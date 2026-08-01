@@ -68,3 +68,22 @@ exactly what tagging a release enables: redeploying a specific, known-good histo
 state through the same reviewed pipeline, rather than needing a separate rollback
 mechanism. `policies/` configuration changes deploy through this same path (ADR-010) — a
 bad policy change rolls back the same way as any other code change.
+
+## Rotating the OpenAI API key
+
+Not tied to a release, but documented here alongside the other operational-credential
+guidance: the OpenAI API key (`OpenAiApiKeySecret`, provisioned only if
+`policies/model_catalogue.yaml` declares an `openai` model — [ADR-029](../adr/0029-multi-provider-routing-openai.md))
+has no automatic rotation, since OpenAI exposes no rotate-in-place API for Secrets
+Manager's native rotation Lambdas to call (see the `AwsSolutions-SMG4` suppression in
+`infrastructure/cdk_constructs/lambda_construct.py` and `threat-model.md`'s T24). To
+rotate it manually:
+
+1. Generate a new API key in the OpenAI dashboard.
+2. `aws secretsmanager put-secret-value --secret-id <OpenAiApiKeySecret ARN, from the
+   `cdk deploy` output> --secret-string <new key>`.
+3. The next Lambda cold start picks up the new value (fetched once per cold start, not
+   cached indefinitely) — no redeploy needed, but a warm execution environment keeps
+   using the old key until it's recycled. For an immediate cutover, force new cold
+   starts (e.g. a trivial Lambda configuration update) rather than waiting.
+4. Revoke the old key in the OpenAI dashboard once confident the new one is in use.

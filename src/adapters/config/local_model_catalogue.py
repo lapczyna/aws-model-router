@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from adapters.config.loader import load_structured_file
 from domain.catalogue import ModelDefinition
+from domain.enums import ModelResolutionType
 from domain.errors import ConfigurationError
 
 
@@ -38,6 +39,20 @@ class LocalFileModelCatalogue:
             raise ConfigurationError(
                 f"Duplicate model_alias values in catalogue at {catalogue_path}: {sorted(duplicates)}"
             )
+
+        models_by_alias = {model.model_alias: model for model in models}
+        for model in models:
+            if model.resolution.type is not ModelResolutionType.ROUTER_ALIAS:
+                continue
+            target = models_by_alias.get(model.resolution.value)
+            if target is not None and target.provider != model.provider:
+                raise ConfigurationError(
+                    f"router_alias {model.model_alias!r} (provider {model.provider.value!r}) "
+                    f"targets {model.resolution.value!r} (provider {target.provider.value!r}) "
+                    f"in catalogue at {catalogue_path} — a router_alias must target a model "
+                    "from the same provider, since the alias's own provider determines which "
+                    "adapter actually handles the invocation."
+                )
 
         self._models = tuple(models)
         self._models_by_alias = {model.model_alias: model for model in models}

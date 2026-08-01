@@ -26,17 +26,27 @@ At 10,000 requests/day, sustained for 30 days:
 | Workload | Model | Est. cost/request | Multiple of cheapest | Est. monthly cost |
 |---|---|---|---|---|
 | short-chat-turn (~200 input chars, 200 max output tokens) | economical-text-primary | $0.000262 | 1.0x | ~$79 |
+| | balanced-text-openai | $0.002125 | 8.1x | ~$638 |
 | | balanced-text-primary | $0.003150 | 12.0x | ~$945 |
 | | balanced-text-secondary | $0.005200 | 19.8x | ~$1,560 |
 | | advanced-reasoning-primary | $0.015750 | 60.1x | ~$4,725 |
 | document-summary (~4,000 input chars, 500 max output tokens) | economical-text-primary | $0.000875 | 1.0x | ~$263 |
+| | balanced-text-openai | $0.007500 | 8.6x | ~$2,250 |
 | | balanced-text-primary | $0.010500 | 12.0x | ~$3,150 |
 | | balanced-text-secondary | $0.020000 | 22.9x | ~$6,000 |
 | | advanced-reasoning-primary | $0.052500 | 60.0x | ~$15,750 |
 | long-document-analysis (~40,000 input chars, 1,500 max output tokens) | economical-text-primary | $0.004375 | 1.0x | ~$1,313 |
+| | balanced-text-openai | $0.040000 | 9.1x | ~$12,000 |
 | | balanced-text-primary | $0.052500 | 12.0x | ~$15,750 |
 | | balanced-text-secondary | $0.116000 | 26.5x | ~$34,800 |
 | | advanced-reasoning-primary | $0.262500 | 60.0x | ~$78,750 |
+
+`balanced-text-openai` (added Phase 10a, ADR-029 — a real OpenAI model, `gpt-4o`) lands
+between `economical-text-primary` and `balanced-text-primary`, consistently ~1.5x cheaper
+than its same-tier Bedrock counterpart across all three workloads at this catalogue's
+sample pricing. This is a genuine cross-provider cost comparison, not a hypothetical one
+— `lowest_cost` strategy would prefer it over `balanced-text-primary` for any application
+whose policy allowlists both (no shipped sample policy does; see `policies/README.md`).
 
 ## What this demonstrates
 

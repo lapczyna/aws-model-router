@@ -35,7 +35,8 @@ application.
 ├───────────────────────────────────────────────────────────────────────────┤
 │ Adapters (src/adapters)                                                   │
 │   Concrete implementations of domain/application interfaces against real │
-│   infrastructure: BedrockModelProvider, DynamoDB-backed repositories,     │
+│   infrastructure: BedrockModelProvider, OpenAIModelProvider (dispatched   │
+│   between by CompositeModelProvider), DynamoDB-backed repositories,       │
 │   CloudWatch metrics publisher, SSM/DynamoDB configuration loaders.       │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
@@ -44,7 +45,8 @@ Dependencies point inward: handlers depend on application, application depends o
 interfaces, adapters implement domain/application interfaces. The domain layer has no
 outward dependencies on AWS or any framework. This is what allows the entire routing
 engine to be unit-tested without AWS credentials (Phase 2) and allows a second model
-provider to be added later purely as a new adapter (ADR-002).
+provider to be added later purely as a new adapter (ADR-002) — realized in Phase 10a
+with `OpenAIModelProvider` (ADR-029).
 
 ## Components
 
@@ -65,10 +67,16 @@ provider to be added later purely as a new adapter (ADR-002).
 * **Routing Strategy** — selects the primary candidate using a deterministic strategy
   (preferred-model, lowest-estimated-cost, quality-tier, latency-preference, or weighted
   experiment — see `docs/adr/0007-deterministic-explainable-routing.md`).
-* **Selected Model Adapter** — the concrete `ModelProvider` implementation (initially
-  `BedrockModelProvider`) that maps the normalized request to a provider-specific call.
-* **Amazon Bedrock Converse API** — the initial provider backend, invoked through
-  Bedrock's provider-agnostic Converse API (ADR-009).
+* **Selected Model Adapter** — `CompositeModelProvider` (ADR-029) resolves the selected
+  model's catalogued `provider` and dispatches to the matching concrete `ModelProvider`
+  implementation — `BedrockModelProvider` or `OpenAIModelProvider` today — which maps the
+  normalized request to that provider's specific call. Neither concrete adapter knows the
+  other exists.
+* **Amazon Bedrock Converse API** — the initial, AWS-native provider backend, invoked
+  through Bedrock's provider-agnostic Converse API (ADR-009).
+* **OpenAI Chat Completions API** — the second, non-AWS provider backend (ADR-029),
+  reached over the public internet rather than within AWS's network (see
+  `docs/security/threat-model.md`'s Boundary 6).
 * **Fallback handling** — on an eligible failure, selects the next approved candidate per
   the application's fallback policy, bounded by a maximum attempt count.
 * **Audit, metrics, and traces** — every decision and invocation attempt is recorded as
@@ -97,7 +105,9 @@ graph TD
     end
 
     subgraph Adapters["Provider & Data Adapters"]
+        Composite["CompositeModelProvider\n(dispatches by model.provider)"]
         BedrockAdapter["BedrockModelProvider"]
+        OpenAIAdapter["OpenAIModelProvider"]
         ConfigRepo["Config / Policy Repository"]
         DecisionRepo["Routing Decision & Idempotency Store"]
         MetricsPub["Metrics Publisher"]
@@ -106,16 +116,23 @@ graph TD
     subgraph AWSServices["AWS Managed Services"]
         Bedrock["Amazon Bedrock Runtime (Converse API)"]
         DynamoDB[("Amazon DynamoDB")]
+        SecretsMgr[("AWS Secrets Manager\n(OpenAI API key)")]
         CWLogs["Amazon CloudWatch Logs"]
         CWMetrics["Amazon CloudWatch Metrics"]
         XRay["AWS X-Ray"]
     end
 
+    subgraph ThirdParty["Third Party (outside AWS)"]
+        OpenAI["OpenAI Chat Completions API"]
+    end
+
     Client --> WAF --> APIGW --> Auth
     Auth --> Validate --> PolicyResolver --> CandidateFilter --> CostEval --> Strategy
-    Strategy --> BedrockAdapter
-    Strategy -.eligible failure.-> FallbackMgr --> BedrockAdapter
-    BedrockAdapter --> Bedrock
+    Strategy --> Composite
+    Strategy -.eligible failure.-> FallbackMgr --> Composite
+    Composite --> BedrockAdapter --> Bedrock
+    Composite --> OpenAIAdapter -.public internet.-> OpenAI
+    OpenAIAdapter --> SecretsMgr
 
     PolicyResolver --> ConfigRepo
     CandidateFilter --> ConfigRepo
@@ -128,15 +145,15 @@ graph TD
 
     Auth --> MetricsPub
     Strategy --> MetricsPub
-    BedrockAdapter --> MetricsPub
+    Composite --> MetricsPub
     MetricsPub --> CWMetrics
 
     Auth --> CWLogs
     Strategy --> CWLogs
-    BedrockAdapter --> CWLogs
+    Composite --> CWLogs
 
     Strategy -.traced.-> XRay
-    BedrockAdapter -.traced.-> XRay
+    Composite -.traced.-> XRay
 ```
 
 ## Request sequence diagram
@@ -255,6 +272,10 @@ graph TB
         Operator["Platform Operator"]
     end
 
+    subgraph ThirdPartyBoundary["Trust Boundary 6 — Third-Party Provider (ADR-029)"]
+        OpenAI["OpenAI Chat Completions API\n(outside AWS)"]
+    end
+
     Client -->|"HTTPS, request-size limited,\nno raw model IDs accepted"| WAF
     WAF --> APIGW
     APIGW -->|"authenticated identity only"| Lambda
@@ -262,6 +283,7 @@ graph TB
     Lambda -->|"read-only, scoped IAM"| Config
     Config --> DynamoDB
     Lambda -->|"invoke: allowlisted models/\ninference profiles only"| Bedrock
+    Lambda -.->|"invoke: opt-in per policy only\n(public internet, prompt content leaves AWS)"| OpenAI
     Lambda -->|"sanitized metadata only\n(no raw prompts/responses)"| CloudWatch
     Lambda -->|"decision/idempotency records\n(sanitized)"| DynamoDB
 
@@ -273,7 +295,7 @@ graph TB
 Key trust decisions this diagram encodes:
 
 * The client crosses exactly one authentication boundary (API Gateway) and never has a
-  direct network path to Bedrock, DynamoDB, or CloudWatch.
+  direct network path to Bedrock, DynamoDB, CloudWatch, or OpenAI.
 * The Lambda execution role (runtime) is distinct from the CDK/GitHub OIDC deployment role
   (deploy-time); neither is a superset of the other by default.
 * Routing configuration (policies, allowlists, pricing) is a separate trust boundary from
@@ -281,6 +303,9 @@ Key trust decisions this diagram encodes:
   changes are versioned and reviewed independently of request traffic.
 * Telemetry crossing into CloudWatch is sanitized metadata, not raw request/response
   content — the observability boundary is intentionally lossy by design (ADR-008).
+* Boundary 6 is the only one that leaves AWS entirely, and only when a policy explicitly
+  allowlists an `openai`-provider model (ADR-029) — every other boundary crossing shown
+  here stays within the AWS account. See `docs/security/threat-model.md`'s T23/T24.
 
 ## What this architecture explicitly avoids
 

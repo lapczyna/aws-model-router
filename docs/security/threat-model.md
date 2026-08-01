@@ -1,7 +1,8 @@
 # Threat model
 
-Scope: `aws-model-router`'s five trust boundaries (`docs/architecture/overview.md`'s
-trust boundary diagram) plus cross-cutting concerns. Each threat lists the existing
+Scope: `aws-model-router`'s six trust boundaries (`docs/architecture/overview.md`'s
+trust boundary diagram, extended in Phase 10a — see Boundary 6) plus cross-cutting
+concerns. Each threat lists the existing
 mitigation (with ADR/code references), the residual risk, and a status:
 **Mitigated** (a real, verified control exists), **Accepted** (a real risk, deliberately
 not fully closed, with rationale), or **Deferred** (scoped to a specific future phase).
@@ -66,6 +67,19 @@ the next concrete step, not deferred without a plan.
 | T19 | Compromised CI/CD deploy credentials | GitHub OIDC, no static AWS keys in GitHub secrets ([ADR-025](../adr/0025-github-oidc-deploy-role-design.md)); the GitHub-trusted role itself only grants `sts:AssumeRole` on the CDK bootstrap roles, never broad permissions directly; PR validation and deployment are separate workflows with disjoint triggers, so a fork PR has no path to any deploy credential at all ([ADR-026](../adr/0026-pr-and-deploy-workflow-separation.md)) | A compromised `main`-branch push (e.g. a maintainer's own compromised account) still reaches `deploy-dev` automatically — `prod` requires a separate human approval (the Environment's required-reviewers rule) | Mitigated |
 | T20 | Unauthorized manual AWS console changes drifting from CDK-defined state | Documented operational discipline (`docs/operations/runbook.md`): manual edits are silently overwritten by the next `cdk deploy` | Detection relies on someone eventually redeploying, not real-time drift detection | Accepted — CloudFormation drift detection is a documented future enhancement, not built speculatively |
 
+## Boundary 6 — Router → third-party model provider (OpenAI, ADR-029)
+
+Every threat above assumes an all-AWS request path (client → API Gateway → Lambda →
+Bedrock). Phase 10a's second provider (OpenAI) is the first time that stops being
+universally true: a request routed to an `openai`-provider catalogue entry sends prompt
+content to a third-party service over the public internet, not another AWS service
+inside AWS's network boundary.
+
+| ID | Threat | Mitigation | Residual risk | Status |
+|---|---|---|---|---|
+| T23 | Prompt/response content leaving the AWS trust boundary entirely when routed to an OpenAI-provider model | TLS in transit (the `openai` SDK's default HTTPS transport); routing to an `openai`-provider model is strictly opt-in per `RoutingPolicy.allowed_model_aliases` — an application never reaches OpenAI unless its policy explicitly allowlists an `openai` catalogue entry, and `policies/applications/multi-provider-demo.yaml` is the only sample policy that does | This project has no control over OpenAI's own data retention/training-use policy for content it receives — that is a vendor agreement/configuration concern (e.g. OpenAI's API data-usage settings), outside this router's own trust boundary and this ADR's scope | Accepted — inherent to offering a non-AWS provider at all, not a gap to close without removing the feature; an operator who cannot accept this should simply not allowlist an `openai` model for that application |
+| T24 | OpenAI API key compromise or leakage | Stored in a dedicated Secrets Manager secret, never a Lambda plaintext env var value ([ADR-029](../adr/0029-multi-provider-routing-openai.md)); `secretsmanager:GetSecretValue` scoped to that one secret's ARN via `Secret.grant_read()`, never a wildcard (verified: `test_openai_secret_grant_is_scoped_to_the_specific_secret_not_wildcard`); the key is fetched once per cold start and only ever passed in-memory to the `openai.OpenAI(...)` client constructor — never logged (the structured-logging attribute whitelist has no field for it, so a call site couldn't log it even by mistake) | No automatic rotation — OpenAI has no rotate-in-place API for Secrets Manager's native rotation Lambdas to call against, so rotation is a manual, documented operational step (`docs/operations/release-process.md`), not an automated one | Mitigated (rotation is manual by necessity, not oversight — see the `AwsSolutions-SMG4` suppression in `infrastructure/cdk_constructs/lambda_construct.py`) |
+
 ## Cross-cutting: AI content safety
 
 | ID | Threat | Mitigation | Residual risk | Status |
@@ -75,12 +89,12 @@ the next concrete step, not deferred without a plan.
 
 ## Summary
 
-22 threats identified across 5 trust boundaries plus AI content safety. 13 Mitigated
-(with a real, verifiable control — code, test, or ADR-documented architectural
-constraint), 7 Accepted (a genuine residual risk with explicit rationale for not closing
-it further now), 2 Deferred (T21/T22, contingent on the not-yet-built Guardrails
-integration per ADR-024). No threat here is silently unaddressed — every row has a
-status and a reason.
+24 threats identified across 6 trust boundaries plus AI content safety (T23/T24 added
+Phase 10a for the new router-to-OpenAI boundary). 14 Mitigated (with a real, verifiable
+control — code, test, or ADR-documented architectural constraint), 8 Accepted (a genuine
+residual risk with explicit rationale for not closing it further now), 2 Deferred
+(T21/T22, contingent on the not-yet-built Guardrails integration per ADR-024). No threat
+here is silently unaddressed — every row has a status and a reason.
 
 The most significant open item is **T2** (cross-application impersonation via
 `applicationId` spoofing) — already flagged as a known limitation when the

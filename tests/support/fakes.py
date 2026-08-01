@@ -84,6 +84,7 @@ class InMemoryRoutingPolicyRepository:
 def make_model(
     model_alias: str,
     *,
+    provider: ProviderName = ProviderName.BEDROCK,
     capability_tags: tuple[str, ...] = ("balanced-text",),
     quality_tier: QualityTier = QualityTier.STANDARD,
     max_input_tokens: int = 200_000,
@@ -93,15 +94,14 @@ def make_model(
     typical_latency: LatencyPreference = LatencyPreference.BALANCED,
     input_price_per_1k_tokens: str = "0.003",
     output_price_per_1k_tokens: str = "0.015",
+    resolution_type: ModelResolutionType = ModelResolutionType.DIRECT_MODEL_ID,
 ) -> ModelDefinition:
     """Build a `ModelDefinition` with sensible defaults, overridable per test."""
     return ModelDefinition(
         model_alias=model_alias,
-        provider=ProviderName.BEDROCK,
+        provider=provider,
         region="us-east-1",
-        resolution=ModelResolution(
-            type=ModelResolutionType.DIRECT_MODEL_ID, value=f"fake.{model_alias}-v1:0"
-        ),
+        resolution=ModelResolution(type=resolution_type, value=f"fake.{model_alias}-v1:0"),
         capabilities=ModelCapabilities(
             capability_tags=capability_tags,
             quality_tier=quality_tier,

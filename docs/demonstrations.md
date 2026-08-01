@@ -1,9 +1,10 @@
 # Sample demonstrations
 
-Ten concrete, reproducible demonstrations of `aws-model-router`'s behavior — the
+Eleven concrete, reproducible demonstrations of `aws-model-router`'s behavior — the
 capabilities a reviewer would most want to see working, each runnable locally without
 AWS credentials (except where noted) using the exact commands below. Every command here
-has been run against this repository; none is aspirational.
+has been run against this repository; none is aspirational. (The first ten were the
+original Phase 9 set; #11 was added in Phase 10a alongside multi-provider routing.)
 
 Setup, once:
 
@@ -133,6 +134,19 @@ cdk-nag's construct-tree security rules never flagged this (it's a schema-confor
 issue, not a security/best-practice one), only cfn-lint's template-schema validation did.
 See [ADR-027](adr/0027-iac-security-scanning-approach.md) for the full story, including
 why both tools are run rather than either alone.
+
+## 11. Cross-provider fallback (Bedrock primary, OpenAI fallback)
+
+```bash
+python scripts/run_demo_scenarios.py --scenario multi-provider-fallback
+```
+
+A single fallback chain spans two different vendors: `policies/applications/
+multi-provider-demo.yaml` configures Bedrock as preferred with OpenAI as fallback.
+`CompositeModelProvider` dispatches each attempt to the correct adapter based on the
+catalogued model's `provider` field — proof that ADR-002's provider-independence claim
+holds for a genuinely different vendor, not just a second Bedrock model family. See
+[ADR-029](adr/0029-multi-provider-routing-openai.md).
 
 ## Requirements traceability
 

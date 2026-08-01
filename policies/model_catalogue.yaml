@@ -88,6 +88,36 @@ models:
     health:
       status: healthy
 
+  - model_alias: balanced-text-openai
+    # This project's second provider (ADR-029): a real OpenAI model, comparable in
+    # quality tier and price to balanced-text-primary, demonstrating that the router's
+    # domain/application layers work identically across providers (ADR-002). Not added
+    # to any existing sample application's allowlist by default — see
+    # policies/applications/multi-provider-demo.yaml for where it's actually used, so
+    # existing demos/tests that assert balanced-text-primary is selected are unaffected.
+    provider: openai
+    region: global
+    resolution:
+      type: direct_model_id
+      value: gpt-4o
+    capabilities:
+      capability_tags: [balanced-text]
+      quality_tier: standard
+      max_input_tokens: 128000
+      max_output_tokens: 4096
+      supports_tool_use: true
+      supports_structured_output: true
+      supports_streaming: true
+      supported_modalities: [text]
+      typical_latency: balanced
+    pricing:
+      currency: USD
+      input_price_per_1k_tokens: "0.0025"
+      output_price_per_1k_tokens: "0.01"
+      pricing_version: 1
+    health:
+      status: healthy
+
   - model_alias: advanced-reasoning-primary
     provider: bedrock
     region: us-east-1

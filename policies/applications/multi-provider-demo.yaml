@@ -1,0 +1,33 @@
+# Sample application demonstrating cross-provider fallback (ADR-029, Phase 10a): the
+# preferred model is served by Amazon Bedrock, and the configured fallback is served by
+# OpenAI — a single fallback chain spanning two different providers, routed correctly
+# by `CompositeModelProvider` without either provider adapter knowing the other exists.
+
+policy_id: multi-provider-demo-default
+policy_version: 1
+
+allowed_capabilities: [balanced-text]
+allowed_model_aliases: [balanced-text-primary, balanced-text-openai]
+allowed_quality_tiers: [standard]
+default_quality_tier: standard
+
+maximum_estimated_cost_usd: "0.02"
+maximum_output_tokens: 500
+
+routing_strategy: preferred_model
+preferred_model_alias: balanced-text-primary
+latency_preference: balanced
+
+# If balanced-text-primary (Bedrock) fails with an eligible (throttled/transient/
+# timeout) invocation error, fall back once to balanced-text-openai (OpenAI) rather
+# than failing the request outright (ADR-011) -- exercising the fallback chain across
+# providers, not just across models within the same one.
+fallback_policy:
+  fallback_model_aliases: [balanced-text-openai]
+  maximum_attempts: 2
+
+allow_client_overrides:
+  quality_tier: false
+  maximum_estimated_cost_usd: true
+  maximum_output_tokens: true
+  latency_preference: true

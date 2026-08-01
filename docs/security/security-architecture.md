@@ -59,6 +59,10 @@ The Lambda execution role is scoped to exactly what the code calls:
 * **X-Ray**: `PutTraceSegments`/`PutTelemetryRecords` with `Resource: "*"` — reviewed
   and accepted, since AWS defines no resource-level permission for either action
   (ADR-022).
+* **Secrets Manager** (Phase 10a, ADR-029): `GetSecretValue` on exactly one secret — the
+  OpenAI API key — via `Secret.grant_read()`, never a wildcard. Provisioned, and this
+  grant added, only if `policies/model_catalogue.yaml` actually declares an `openai`
+  model; a Bedrock-only deployment has no Secrets Manager permission on this role at all.
 
 No permission here was added because "it might be useful" — every statement traces to
 a specific, reviewed line of adapter code.

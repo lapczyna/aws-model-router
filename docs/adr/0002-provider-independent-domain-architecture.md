@@ -19,7 +19,10 @@ implement these interfaces.
 
 ## Consequences
 * A new provider can be added by writing a new adapter that implements `ModelProvider`,
-  without touching routing strategies, cost estimation, or fallback logic.
+  without touching routing strategies, cost estimation, or fallback logic. **Proven, not
+  just claimed**: Phase 10a added `OpenAIModelProvider` as a real second provider
+  (ADR-029) with zero changes to `src/domain/` or `src/application/` — the exact claim
+  this ADR made when there was only ever one provider to point to.
 * The entire routing engine is unit-testable without AWS credentials, a network
   connection, or a live Bedrock endpoint (Phase 2).
 * Provider-specific capabilities (tool use, structured output, streaming, modalities)

@@ -14,6 +14,7 @@ from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_secretsmanager as secretsmanager
 from cdk_nag import NagSuppressions
 from constructs import Construct
 
@@ -24,18 +25,30 @@ _HANDLER_ENTRY_POINT = "handlers.api_handler.handler"
 _BEDROCK_ACTIONS = ("bedrock:InvokeModel", "bedrock:Converse", "bedrock:ConverseStream")
 
 
-def _load_bedrock_resource_arns(repo_root: Path, region: str, account_id: str) -> list[str]:
-    """Parse `policies/model_catalogue.yaml` at synth time to scope the Lambda's
-    Bedrock IAM permissions to exactly the catalogued models/inference profiles
-    (`docs/requirements.md` NFR-2.2: "model/inference-profile restrictions where
-    feasible") — rather than a blanket `resources=["*"]`.
-    """
+def _load_catalogue_models(repo_root: Path) -> list[dict[str, Any]]:
     catalogue_path = repo_root / "policies" / "model_catalogue.yaml"
     with catalogue_path.open("r", encoding="utf-8") as handle:
         data: dict[str, Any] = yaml.safe_load(handle)
+    models: list[dict[str, Any]] = data.get("models", [])
+    return models
 
+
+def _load_bedrock_resource_arns(
+    models: list[dict[str, Any]], region: str, account_id: str
+) -> list[str]:
+    """Scope the Lambda's Bedrock IAM permissions to exactly the catalogued Bedrock
+    models/inference profiles (`docs/requirements.md` NFR-2.2: "model/inference-profile
+    restrictions where feasible") — rather than a blanket `resources=["*"]`.
+
+    Non-Bedrock catalogue entries (e.g. `provider: openai`, added in Phase 10a) are
+    skipped entirely — their `resolution.value` is a provider-specific identifier (an
+    OpenAI model name, not a Bedrock model ID), and building a Bedrock ARN from it would
+    be meaningless at best and a stray, unnecessary IAM grant at worst.
+    """
     arns: set[str] = set()
-    for model in data.get("models", []):
+    for model in models:
+        if model.get("provider") != "bedrock":
+            continue
         resolution = model["resolution"]
         resolution_type = resolution["type"]
         value = resolution["value"]
@@ -43,9 +56,13 @@ def _load_bedrock_resource_arns(repo_root: Path, region: str, account_id: str) -
             arns.add(f"arn:aws:bedrock:{region}::foundation-model/{value}")
         elif resolution_type in ("cross_region_inference_profile", "application_inference_profile"):
             arns.add(f"arn:aws:bedrock:{region}:{account_id}:inference-profile/{value}")
-        # "router_alias" resolves (one bounded hop — BedrockModelProvider) to another
-        # catalogue entry already covered by this same loop; it names no ARN itself.
+        # "router_alias" resolves (one bounded hop) to another catalogue entry already
+        # covered by this same loop; it names no ARN itself.
     return sorted(arns)
+
+
+def _catalogue_uses_openai(models: list[dict[str, Any]]) -> bool:
+    return any(model.get("provider") == "openai" for model in models)
 
 
 class LambdaConstruct(Construct):
@@ -62,6 +79,49 @@ class LambdaConstruct(Construct):
         super().__init__(scope, construct_id)
 
         stack = Stack.of(self)
+        catalogue_models = _load_catalogue_models(repo_root)
+        uses_openai = _catalogue_uses_openai(catalogue_models)
+
+        openai_secret: secretsmanager.Secret | None = None
+        if uses_openai:
+            # Provisioned only if the catalogue actually declares an `openai` model
+            # (ADR-029) — a Secrets Manager secret has a flat monthly cost regardless of
+            # use, so a Bedrock-only deployment never pays for one it doesn't need
+            # (the same "no unnecessary always-on cost" discipline as ADR-005). CDK
+            # generates a random placeholder value at creation time; a real key must be
+            # set post-deploy (`aws secretsmanager put-secret-value`), the same
+            # "provision the resource, the real credential is a manual step" pattern
+            # already used for the Phase 6 SNS topic subscription.
+            openai_secret = secretsmanager.Secret(
+                self,
+                "OpenAiApiKeySecret",
+                description=(
+                    "OpenAI API key for OpenAIModelProvider (ADR-029). Placeholder value "
+                    "at creation; set the real key with "
+                    "`aws secretsmanager put-secret-value` after deploying."
+                ),
+                removal_policy=environment_config.removal_policy,
+            )
+            NagSuppressions.add_resource_suppressions(
+                openai_secret,
+                [
+                    {
+                        "id": "AwsSolutions-SMG4",
+                        "reason": (
+                            "Secrets Manager's native automatic rotation is built for "
+                            "AWS-managed services (RDS, Redshift, DocumentDB) that expose "
+                            "a rotation API Secrets Manager's Lambda rotation functions "
+                            "call. An OpenAI API key has no equivalent rotate-in-place "
+                            "API — rotating it means generating a new key in the OpenAI "
+                            "dashboard and revoking the old one, an inherently external, "
+                            "manual action a custom rotation Lambda couldn't automate "
+                            "away. Manual rotation is documented in "
+                            "docs/operations/release-process.md; this is a scope "
+                            "limitation of the third-party credential, not an oversight."
+                        ),
+                    },
+                ],
+            )
 
         log_group = logs.LogGroup(
             self,
@@ -106,9 +166,17 @@ class LambdaConstruct(Construct):
                 "MAX_REQUEST_BODY_BYTES": str(environment_config.max_request_body_bytes),
                 "LOG_LEVEL": "INFO",
                 "ENVIRONMENT_NAME": environment_config.env_name,
+                **(
+                    {"OPENAI_API_KEY_SECRET_ARN": openai_secret.secret_arn}
+                    if openai_secret is not None
+                    else {}
+                ),
             },
             tracing=lambda_.Tracing.ACTIVE,
         )
+
+        if openai_secret is not None:
+            openai_secret.grant_read(self.function)
 
         # Explicit, minimal action grants (ADR-022) rather than `grant_read_write_data()`
         # — that helper grants Scan/Query/BatchGetItem/BatchWriteItem/
@@ -123,7 +191,7 @@ class LambdaConstruct(Construct):
         )
 
         bedrock_resource_arns = _load_bedrock_resource_arns(
-            repo_root, region=stack.region, account_id=stack.account
+            catalogue_models, region=stack.region, account_id=stack.account
         )
         self.function.add_to_role_policy(
             iam.PolicyStatement(

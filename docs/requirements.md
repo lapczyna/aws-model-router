@@ -41,7 +41,12 @@ explaining why a route was selected, and why alternatives were not.
 
 FR-3.1. The router invokes the selected model through a provider-independent
 `ModelProvider` interface; Amazon Bedrock (via the Converse API) is the first
-implementation.
+implementation, OpenAI (via the Chat Completions API) is the second
+([ADR-029](adr/0029-multi-provider-routing-openai.md), Phase 10a). A
+`CompositeModelProvider` dispatches each request to the correct concrete adapter based
+on the catalogued model's `provider` field — this dispatch is itself just another
+`ModelProvider` implementation from the application layer's point of view, so this
+requirement holds regardless of how many providers are actually registered.
 
 FR-3.2. Clients cannot submit raw provider model IDs. They request logical capabilities;
 trusted, server-side configuration resolves capabilities to specific model aliases,
@@ -188,15 +193,19 @@ raising on any other property (ADR-019; `docs/operations/observability.md`).
 ### NFR-5 — Testability
 
 NFR-5.1. The domain and application layers are testable without AWS credentials, a
-network connection, or a live Bedrock endpoint.
+network connection, or a live provider endpoint (Bedrock or OpenAI).
 
-NFR-5.2. Provider adapters are tested with fakes or `botocore.stub.Stubber`; any test
-requiring a real AWS call is explicitly opt-in and excluded from CI.
+NFR-5.2. Provider adapters are tested with fakes, `botocore.stub.Stubber` (Bedrock), or
+real SDK response/exception types constructed directly (OpenAI, ADR-029 — the `openai`
+package has no equivalent public stubber); any test requiring a real network call to a
+provider is explicitly opt-in and excluded from CI.
 
 ### NFR-6 — Extensibility
 
 NFR-6.1. A new model provider can be added by implementing the `ModelProvider` interface,
-without changes to the core routing domain logic.
+without changes to the core routing domain logic. **Verified, not just designed for**:
+`OpenAIModelProvider` (Phase 10a, ADR-029) was added with zero changes to `src/domain/`
+or `src/application/`.
 
 NFR-6.2. Model capabilities (token limits, tool use, structured output, streaming,
 modalities) are explicit, per-model configuration — never assumed uniform across models.

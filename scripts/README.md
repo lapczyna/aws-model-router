@@ -21,6 +21,17 @@ Developer and operational scripts.
   python scripts/bedrock_live_smoke_test.py --model-alias economical-text-primary --confirm-cost
   ```
 
+* [`openai_live_smoke_test.py`](openai_live_smoke_test.py) — **makes a real, billable
+  OpenAI call** (ADR-029). Same opt-in gating as `bedrock_live_smoke_test.py`, plus a
+  real OpenAI API key (`OPENAI_API_KEY` environment variable or `--api-key`). Never run
+  by the automated test suite or CI.
+
+  ```bash
+  export AWS_MODEL_ROUTER_ENABLE_LIVE_SMOKE_TEST=true
+  export OPENAI_API_KEY=sk-...
+  python scripts/openai_live_smoke_test.py --model-alias balanced-text-openai --confirm-cost
+  ```
+
 * [`invoke_lambda_locally.py`](invoke_lambda_locally.py) — invokes the real Lambda
   handler code (`src/handlers/api_handler.py`) against a synthetic API Gateway proxy
   event, without deploying anything. Defaults to fake mode: no AWS credentials required,
@@ -59,14 +70,16 @@ Developer and operational scripts.
   python scripts/cost_comparison_report.py
   ```
 
-* [`run_demo_scenarios.py`](run_demo_scenarios.py) — narrated walkthroughs of four
-  scenarios that need scripted behavior rather than a static example file:
-  model-invocation fallback, idempotent duplicate requests, model health degradation, and
-  observability (structured logs + EMF metrics for one request). No AWS credentials
-  required. See [`docs/demonstrations.md`](../docs/demonstrations.md) for all 10 sample
-  demonstrations, including the six with existing dedicated scripts/fixtures.
+* [`run_demo_scenarios.py`](run_demo_scenarios.py) — narrated walkthroughs of scenarios
+  that need scripted behavior rather than a static example file: model-invocation
+  fallback, idempotent duplicate requests, model health degradation, observability
+  (structured logs + EMF metrics for one request), and cross-provider fallback (Bedrock
+  primary, OpenAI fallback, via a real `CompositeModelProvider` — Phase 10a, ADR-029). No
+  AWS credentials required. See [`docs/demonstrations.md`](../docs/demonstrations.md) for
+  all sample demonstrations, including the ones with existing dedicated scripts/fixtures.
 
   ```bash
-  python scripts/run_demo_scenarios.py                      # run all four
+  python scripts/run_demo_scenarios.py                      # run all scenarios
   python scripts/run_demo_scenarios.py --scenario fallback
+  python scripts/run_demo_scenarios.py --scenario multi-provider-fallback
   ```

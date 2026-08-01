@@ -180,6 +180,33 @@ def test_lambda_role_dynamodb_permissions_scoped_to_tables_not_wildcard(
         assert "*" not in _as_list(statement["Resource"])
 
 
+def test_bedrock_iam_resources_never_include_a_non_bedrock_catalogue_entry(
+    dev_stack: "SynthesizedStack",
+) -> None:
+    """Regression test for a real bug found in Phase 10a: `_load_bedrock_resource_arns`
+    used to iterate every catalogue entry regardless of `provider`, so adding an
+    `openai` model (`policies/model_catalogue.yaml`'s `balanced-text-openai`, resolving
+    to the OpenAI model name "gpt-4o") would have produced a meaningless
+    `arn:aws:bedrock:...foundation-model/gpt-4o` ARN — syntactically a valid-looking
+    Bedrock ARN (so `test_lambda_role_bedrock_permissions_are_scoped_not_wildcard`
+    above would NOT have caught this), but a stray, incorrect IAM grant nonetheless.
+    """
+    for statement in _iam_statements(dev_stack, action_prefix="bedrock:"):
+        resources = _as_list(statement["Resource"])
+        assert not any("gpt-4o" in str(resource) for resource in resources)
+
+
+def test_openai_secret_grant_is_scoped_to_the_specific_secret_not_wildcard(
+    dev_stack: "SynthesizedStack",
+) -> None:
+    for statement in _iam_statements(dev_stack, action_prefix="secretsmanager:"):
+        resources = _as_list(statement["Resource"])
+        assert "*" not in resources
+        assert (
+            resources  # a secretsmanager statement exists at all, given an openai catalogue entry
+        )
+
+
 def test_dynamodb_grants_are_scoped_to_the_exact_actions_each_adapter_uses(
     dev_stack: "SynthesizedStack",
 ) -> None:

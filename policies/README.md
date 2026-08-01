@@ -18,26 +18,30 @@ no AWS dependency.
     (ADR-011).
   - `experimental-app.yaml` — `experiment` strategy, weighted 70/30 between
     `balanced-text-primary` and `balanced-text-secondary` (ADR-012).
+  - `multi-provider-demo.yaml` — `preferred_model` strategy **with** a configured
+    `fallback_policy` that spans two different providers: `balanced-text-primary`
+    (Bedrock) preferred, `balanced-text-openai` (OpenAI) as fallback (ADR-029, Phase
+    10a). See `scripts/run_demo_scenarios.py --scenario multi-provider-fallback`.
 
 Pricing values in these files must be quoted strings (e.g. `"0.00025"`), not bare
 numbers — see `src/domain/money.py` for why (unquoted YAML numbers parse as a lossy
 binary float, which is rejected at validation time).
 
-## Routing-strategy coverage (Phase 9 sample policy review)
+## Routing-strategy coverage (Phase 9 sample policy review, updated Phase 10a)
 
-Between them, these three files cover `preferred_model` (no `fallback_policy`
-configured — `default_policy.yaml`), `lowest_cost` (with a `fallback_policy` —
-`support-assistant.yaml`), and `experiment` (`experimental-app.yaml`). Two combinations
-are deliberately *not* represented by a static sample file, since adding them would
-require either changing `default_policy.yaml`'s intentionally single-model, conservative
-scope (see its own comment) or adding a fourth file for illustration alone:
+Between them, these four files cover `preferred_model` both without a `fallback_policy`
+(`default_policy.yaml`) and with one (`multi-provider-demo.yaml`, added Phase 10a),
+`lowest_cost` (with a `fallback_policy` — `support-assistant.yaml`), and `experiment`
+(`experimental-app.yaml`). One combination remains deliberately *not* represented by a
+static sample file:
 
-* `preferred_model` **with** a configured `fallback_policy` — see
-  `scripts/run_demo_scenarios.py`'s `demo_fallback`/`demo_health_degradation` (which
-  build their own small in-code policy) and ADR-028 for exactly this combination, since
-  it's the one where a health-excluded preferred model must still fall back correctly.
 * `quality_tier` strategy — see `tests/unit/domain/test_strategy.py` for its unit-level
   coverage; no sample application currently uses it.
+
+The health-excluded-preferred-model scenario (ADR-028) is demonstrated in code, not a
+static file, since it needs a scripted health-repository setup rather than a fixed
+request/response pair — see `scripts/run_demo_scenarios.py --scenario
+health-degradation`.
 
 See [`docs/architecture/domain-glossary.md`](../docs/architecture/domain-glossary.md) for
 the domain model these files implement, and

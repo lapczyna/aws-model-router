@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain.enums import (
     LatencyPreference,
@@ -8,6 +8,13 @@ from domain.enums import (
     QualityTier,
 )
 from domain.money import Money
+
+_BEDROCK_ONLY_RESOLUTION_TYPES = frozenset(
+    {
+        ModelResolutionType.CROSS_REGION_INFERENCE_PROFILE,
+        ModelResolutionType.APPLICATION_INFERENCE_PROFILE,
+    }
+)
 
 
 class ModelCapabilities(BaseModel):
@@ -85,3 +92,16 @@ class ModelDefinition(BaseModel):
     capabilities: ModelCapabilities
     pricing: ModelPricing
     health: ModelHealth = ModelHealth()
+
+    @model_validator(mode="after")
+    def _validate_resolution_matches_provider(self) -> "ModelDefinition":
+        if (
+            self.provider is not ProviderName.BEDROCK
+            and self.resolution.type in _BEDROCK_ONLY_RESOLUTION_TYPES
+        ):
+            raise ValueError(
+                f"resolution.type {self.resolution.type.value!r} is Bedrock-specific and "
+                f"cannot be used with provider {self.provider.value!r} (model_alias "
+                f"{self.model_alias!r})"
+            )
+        return self

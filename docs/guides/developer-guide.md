@@ -40,8 +40,17 @@ docs/              Everything else: architecture, security, cost, operations, gu
 ```
 
 `domain` → `application` → `adapters`/`handlers` is a one-way dependency direction
-(ADR-002): `domain` never imports from `adapters`, so any provider (Bedrock today) or
-storage backend (DynamoDB today) can be swapped without touching business logic.
+(ADR-002): `domain` never imports from `adapters`, so any provider (Bedrock and OpenAI
+today — ADR-029) or storage backend (DynamoDB today) can be swapped without touching
+business logic.
+
+**Two separately-maintained runtime-dependency lists must stay in sync**: `pyproject.toml`'s
+`dependencies` (what `pip install -e .` gives you locally) and
+`infrastructure/lambda_requirements.txt` (what actually gets bundled into the deployed
+Lambda — `infrastructure/bundling.py`). Adding a new runtime import to `src/` — e.g. a
+new provider adapter's SDK — needs both updated; missing the second one passes every
+local test and `mypy` check fine (they use your local environment, not the Lambda
+bundle) and only fails as a real `ModuleNotFoundError` in a deployed Lambda.
 
 ## Local setup
 

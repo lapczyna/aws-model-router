@@ -59,6 +59,20 @@ expected behavior:
 4. Review CloudTrail for every API call the compromised role made during the
    suspected window before considering the incident closed.
 
+## Suspected compromised OpenAI API key (ADR-029, threat model T24)
+
+1. Revoke the key immediately in the OpenAI dashboard — this is the fastest containment
+   step and doesn't require an AWS action at all.
+2. Follow `docs/operations/release-process.md`'s "Rotating the OpenAI API key" to
+   provision a replacement and confirm the Lambda picks it up.
+3. Check the OpenAI dashboard's own usage/billing view for the affected window — this
+   router's `EstimatedCostUsd` metric only covers Bedrock-priced estimates computed from
+   `policies/model_catalogue.yaml`; it is not a substitute for OpenAI's own billing record
+   for OpenAI-provider spend.
+4. If the key was exposed via a broader Lambda-execution-role or AWS-account compromise
+   (not just the key itself), also follow "Suspected compromised AWS credentials" above —
+   these are independent risks that can co-occur, not mutually exclusive incidents.
+
 ## Suspected denial-of-wallet (cost abuse)
 
 1. Check `ModelRouter EstimatedCostUsd` and `RequestCount` (Phase 6 dashboard) for the

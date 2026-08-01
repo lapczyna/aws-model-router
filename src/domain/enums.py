@@ -34,6 +34,7 @@ class RoutingStrategyType(StrEnum):
 
 class ProviderName(StrEnum):
     BEDROCK = "bedrock"
+    OPENAI = "openai"
 
 
 class ModelHealthStatus(StrEnum):

@@ -7,22 +7,23 @@ capabilities, application identity, data classification, allowlists, estimated c
 latency preference, quality tier, model health, regional availability, token limits,
 fallback configuration, experimentation, and governance requirements.
 
-The initial provider is **Amazon Bedrock**. The architecture is deliberately
-provider-independent so a second provider could be added later through an adapter,
-without changing the routing domain.
+The initial provider was **Amazon Bedrock**; **OpenAI** is the second (Phase 10a). The
+architecture is provider-independent by design (ADR-002) — a `CompositeModelProvider`
+dispatches each request to the correct adapter based on the catalogued model's
+`provider` field, and neither concrete adapter has any awareness the other exists.
 
-> **Status: Phase 9 — Performance, load testing, and portfolio polish.** A higher-
-> concurrency/randomized-fault-injection test suite
-> (`tests/unit/application/test_load_and_fault_injection.py`) found and fixed a real
-> gap: health-based exclusion of the preferred model previously caused total request
-> failure instead of falling back to a healthy alternate
-> ([ADR-028](docs/adr/0028-fallback-chain-considers-health-excluded-candidates.md)).
-> Also added: a routing-latency benchmark, a cost-comparison report across the model
-> catalogue, ten reproducible sample demonstrations
-> ([`docs/demonstrations.md`](docs/demonstrations.md)), five new developer/operator
-> guides ([`docs/guides/`](docs/guides/)), a release process, and a verified final
-> architecture review ([`docs/architecture/final-review.md`](docs/architecture/final-review.md)).
-> See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap.
+> **Status: Phase 10a — Multi-provider routing.** `OpenAIModelProvider`
+> (`src/adapters/openai/`) is a real second `ModelProvider`, dispatched to by a new
+> `CompositeModelProvider` — proof that ADR-002's provider-independence claim holds for
+> a genuinely different vendor, not just a second Bedrock model family. See
+> [ADR-029](docs/adr/0029-multi-provider-routing-openai.md). A single fallback chain can
+> now span two providers (`policies/applications/multi-provider-demo.yaml`), and the
+> threat model gained a new trust boundary (T23/T24) for the first request path that
+> leaves AWS entirely. Also fixed a real, previously-latent bug found while building
+> this: `_load_bedrock_resource_arns` would have built a meaningless Bedrock IAM ARN for
+> a non-Bedrock catalogue entry had it not been filtered by provider first. See
+> [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap, including Phase 9's
+> ten reproducible demonstrations and verified architecture review.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -35,11 +36,11 @@ This project exists to demonstrate how I approach building a real AWS system, no
 to call a foundation model. If you're reviewing this as a portfolio piece, the fastest
 path in:
 
-* **[`docs/demonstrations.md`](docs/demonstrations.md)** — ten concrete, reproducible
+* **[`docs/demonstrations.md`](docs/demonstrations.md)** — eleven concrete, reproducible
   demonstrations (routing decisions, fallback, experimentation, idempotency, cost
   rejection, health degradation, a full HTTP round trip, observability, a security
-  abuse-case test, and CI/CD catching a real bug), each with the exact command to run it
-  yourself, no AWS credentials needed for nine of the ten.
+  abuse-case test, CI/CD catching a real bug, and cross-provider fallback), each with the
+  exact command to run it yourself, no AWS credentials needed for ten of the eleven.
 * **[`docs/architecture/final-review.md`](docs/architecture/final-review.md)** — a
   verified (not asserted) end-to-end architecture review: what was checked and how,
   including a real defect the review process itself caught and fixed
@@ -133,18 +134,28 @@ defined in [`docs/architecture/domain-glossary.md`](docs/architecture/domain-glo
 and implemented as immutable, `mypy --strict`-typed Pydantic models under
 [`src/domain/`](src/domain/), with zero AWS SDK imports (ADR-002).
 
-## Bedrock provider adapter
+## Provider adapters (Bedrock and OpenAI)
 
 `BedrockModelProvider` (under [`src/adapters/bedrock/`](src/adapters/bedrock/))
-implements `domain.ports.ModelProvider` against the Bedrock Converse API (ADR-009): it
-resolves a logical model alias through the catalogue (never a client-supplied model
-ID — ADR-006), validates the request against that model's declared capabilities,
-invokes it, and classifies any failure into a stable
+implements `domain.ports.ModelProvider` against the Bedrock Converse API (ADR-009), and
+`OpenAIModelProvider` (under [`src/adapters/openai/`](src/adapters/openai/)) implements
+the same interface against OpenAI's Chat Completions API (ADR-029, Phase 10a). Both:
+resolve a logical model alias through the catalogue (never a client-supplied model ID —
+ADR-006), validate the request against that model's declared capabilities, invoke it,
+and classify any failure into the same stable
 `throttled | transient | timeout | permanent` taxonomy with bounded, full-jitter
-exponential-backoff retries. Every test exercises this against a hand-rolled fake client
-or a real boto3 client wrapped in `botocore.stub.Stubber` — no test makes a live AWS
-call. A real invocation is available only via the explicitly opt-in
-[`scripts/bedrock_live_smoke_test.py`](scripts/bedrock_live_smoke_test.py) (env-flag +
+exponential-backoff retries — retry/resolution/capability-check logic is shared via
+[`src/adapters/common/`](src/adapters/common/), not duplicated per provider.
+`CompositeModelProvider` ([`src/adapters/composite_model_provider.py`](src/adapters/composite_model_provider.py))
+dispatches each request to whichever adapter matches the resolved model's `provider`
+field; neither concrete adapter has any awareness the other exists.
+
+Every test exercises these against a hand-rolled fake client, a real boto3 client
+wrapped in `botocore.stub.Stubber` (Bedrock), or real `openai` SDK response/exception
+types constructed directly (OpenAI) — no test makes a live network call. A real
+invocation is available only via the explicitly opt-in
+[`scripts/bedrock_live_smoke_test.py`](scripts/bedrock_live_smoke_test.py) /
+[`scripts/openai_live_smoke_test.py`](scripts/openai_live_smoke_test.py) (env-flag +
 `--confirm-cost` gated, never run by CI).
 
 ## Fallback, experimentation, and idempotency
@@ -366,6 +377,7 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [026](docs/adr/0026-pr-and-deploy-workflow-separation.md) | PR and deployment workflow separation |
 | [027](docs/adr/0027-iac-security-scanning-approach.md) | IaC security scanning — cdk-nag and cfn-lint |
 | [028](docs/adr/0028-fallback-chain-considers-health-excluded-candidates.md) | Fallback chain must apply even when the strategy selects nothing |
+| [029](docs/adr/0029-multi-provider-routing-openai.md) | Multi-provider routing — OpenAI as the second provider |
 
 ## Repository structure
 
@@ -396,12 +408,13 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── stacks/               # model_router_stack.py, github_oidc_stack.py
 │   └── cdk_constructs/       # storage (DynamoDB), lambda, api gateway, observability constructs
 ├── policies/                # Version-controlled routing policy & model catalogue configuration
-├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock_live_smoke_test.py,
+├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock/openai_live_smoke_test.py,
 │                             # benchmark_routing.py, cost_comparison_report.py, run_demo_scenarios.py
 ├── src/
 │   ├── domain/               # Pure Python domain models, routing strategies, reason codes
 │   ├── application/          # Orchestration: validation → policy → filter → cost → strategy → invoke
-│   ├── adapters/              # BedrockModelProvider, DynamoDB repositories, in-memory health, EMF metrics
+│   ├── adapters/              # BedrockModelProvider, OpenAIModelProvider, CompositeModelProvider,
+│   │                          # DynamoDB repositories, in-memory health, EMF metrics, common/ (shared)
 │   ├── handlers/              # Thin AWS Lambda entry point (api_handler.py)
 │   └── shared/                 # Clock, IdentifierGenerator, structured JSON logging
 ├── tests/
@@ -504,8 +517,9 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 6 | Observability, auditability, and cost governance |
 | 7 | Security and resilience hardening |
 | 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |
-| 9 | Performance, load testing, and portfolio polish *(this phase)* |
-| 10 | Advanced extensions *(optional, explicit request only)* |
+| 9 | Performance, load testing, and portfolio polish |
+| 10a | Multi-provider routing — OpenAI *(this phase)* |
+| 10b+ | Any other Phase 10 item *(optional, explicit request only per item)* |
 
 ## What this project deliberately does not do
 

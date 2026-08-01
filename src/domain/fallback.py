@@ -5,7 +5,7 @@ explicitly configure `fallback_model_aliases` for any fallback to be attempted a
 `maximum_attempts` bounds the *entire* fallback chain (primary plus fallbacks) — this is
 both the "maximum invocation attempts" and the "retry budget" control (ADR-014):
 bounding the number of *distinct models* tried per logical request, independent of
-`adapters.bedrock.retry.RetryPolicy`, which separately bounds retries *within* a single
+`adapters.common.retry.RetryPolicy`, which separately bounds retries *within* a single
 model's invocation.
 """
 

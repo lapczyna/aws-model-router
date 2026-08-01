@@ -74,3 +74,8 @@ def test_unsupported_extension_raises_configuration_error() -> None:
 def test_non_mapping_top_level_raises_configuration_error() -> None:
     with pytest.raises(ConfigurationError):
         LocalFileModelCatalogue(FIXTURES / "not_a_mapping.json")
+
+
+def test_router_alias_targeting_a_different_provider_raises_configuration_error() -> None:
+    with pytest.raises(ConfigurationError, match="must target a model from the same provider"):
+        LocalFileModelCatalogue(FIXTURES / "catalogue_router_alias_cross_provider.yaml")

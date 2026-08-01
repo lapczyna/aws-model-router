@@ -142,7 +142,9 @@ existing codes are never repurposed.
 Defined in the domain/application layers and implemented by adapters (Phase 2–4):
 
 * **ModelProvider** — invokes a model given a `ProviderRequest`; returns a
-  `ProviderResponse` or a typed `ProviderError` (Phase 3; `BedrockModelProvider`).
+  `ProviderResponse` or a typed `ProviderError` (Phase 3; `BedrockModelProvider`,
+  `OpenAIModelProvider` — dispatched between by `CompositeModelProvider`, Phase 10a,
+  ADR-029).
 * **ModelCatalogue** — resolves logical capabilities/aliases to `ModelDefinition`s
   (Phase 2; `LocalFileModelCatalogue`).
 * **RoutingPolicyRepository** — resolves the effective `RoutingPolicy` for an

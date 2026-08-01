@@ -3,5 +3,6 @@
 # explicitly (not relying on the Lambda runtime's built-in, unpredictable-version copy)
 # specifically because the Bedrock Converse API needs a minimum botocore version.
 boto3>=1.34.116,<2.0
+openai>=1.30,<2.0
 pydantic>=2.6,<3.0
 PyYAML>=6.0,<7.0
