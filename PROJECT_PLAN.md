@@ -428,7 +428,7 @@ configures a real OTLP endpoint, mirroring T23's reasoning for OpenAI).
 - [x] Real demo scenarios: `scripts/run_demo_scenarios.py --scenario decision-events`
       and `--scenario tracing`, both printing real, verified output
 - [x] Threat model updated (T25–T27); observability guide updated with both new sections
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 ## Completed milestones
 
@@ -444,7 +444,7 @@ configures a real OTLP endpoint, mirroring T23's reasoning for OpenAI).
 | Phase 8 — CI/CD with GitHub Actions | Complete | `fc9fe49` |
 | Phase 9 — Performance, load testing, and portfolio polish | Complete | `6063cb4` |
 | Phase 10a — Multi-provider routing (OpenAI) | Complete | `f0e9a00` |
-| Phase 10b — EventBridge decision events + OpenTelemetry tracing | Complete | *(pending commit)* |
+| Phase 10b — EventBridge decision events + OpenTelemetry tracing | Complete | `59d6710` |
 
 ## Remaining milestones
 
