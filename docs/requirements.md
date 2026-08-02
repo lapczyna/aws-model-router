@@ -190,6 +190,12 @@ IDs are never used as metric dimensions — every custom metric declares exactly
 CloudWatch dimension (`Environment`), enforced by `EmfMetricsPublisher._put_metric`
 raising on any other property (ADR-019; `docs/operations/observability.md`).
 
+NFR-4.3. Individual routing decisions can be published as events for external
+subscribers, and traced as distributed spans, without either mechanism ever carrying raw
+prompt/response content — `EventBridgeDecisionEventPublisher` (ADR-030) and OpenTelemetry
+span attributes (ADR-031) both apply the same sanitized-metadata discipline as NFR-4.1's
+structured logs (Phase 10b).
+
 ### NFR-5 — Testability
 
 NFR-5.1. The domain and application layers are testable without AWS credentials, a

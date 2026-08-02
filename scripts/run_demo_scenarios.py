@@ -16,6 +16,8 @@ Usage:
     python scripts/run_demo_scenarios.py --scenario health-degradation
     python scripts/run_demo_scenarios.py --scenario observability
     python scripts/run_demo_scenarios.py --scenario multi-provider-fallback
+    python scripts/run_demo_scenarios.py --scenario decision-events
+    python scripts/run_demo_scenarios.py --scenario tracing
 """
 
 import argparse
@@ -172,6 +174,8 @@ def _build_orchestrator(
     idempotency_store: Any = None,
     decision_repository: Any = None,
     metrics_publisher: Any = None,
+    decision_event_publisher: Any = None,
+    tracer: Any = None,
 ) -> InvocationOrchestrator:
     primary = _make_model("primary")
     fallback = _make_model("fallback")
@@ -186,6 +190,7 @@ def _build_orchestrator(
         clock=clock,
         identifier_generator=Uuid4IdentifierGenerator(),
         model_health_repository=model_health_repository,
+        tracer=tracer,
     )
     return InvocationOrchestrator(
         route_evaluation_service=route_service,
@@ -197,6 +202,8 @@ def _build_orchestrator(
         decision_repository=decision_repository,
         model_health_repository=model_health_repository,
         metrics_publisher=metrics_publisher,
+        decision_event_publisher=decision_event_publisher,
+        tracer=tracer,
     )
 
 
@@ -393,12 +400,73 @@ def demo_multi_provider_fallback() -> None:
     print("   adapter had any awareness the other exists. See ADR-002 and ADR-029.")
 
 
+class _FakeEventBridgeClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def put_events(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return {"FailedEntryCount": 0, "Entries": [{"EventId": "evt-demo"}]}
+
+
+def demo_decision_events() -> None:
+    _banner("Demo: EventBridge decision events (Phase 10b, ADR-030)")
+    import json
+
+    from adapters.events.eventbridge_decision_event_publisher import (
+        EventBridgeDecisionEventPublisher,
+    )
+
+    fake_client = _FakeEventBridgeClient()
+    publisher = EventBridgeDecisionEventPublisher(client=fake_client, event_bus_name="demo-bus")  # type: ignore[arg-type]
+    provider = _CountingSuccessProvider()
+    orchestrator = _build_orchestrator(provider, decision_event_publisher=publisher)
+
+    orchestrator.invoke(_request())
+
+    print(f"Events published to EventBridge: {len(fake_client.calls)}")
+    detail = json.loads(fake_client.calls[0]["Entries"][0]["Detail"])
+    print(json.dumps(detail, indent=2))
+    print("\n-> The event's Detail is metadata only -- decision/policy IDs, capability,")
+    print("   selected model, cost -- never raw prompt/response content. An external")
+    print("   system can subscribe to this bus instead of polling")
+    print("   GET /v1/decisions/{decisionId}. See ADR-030.")
+
+
+def demo_tracing() -> None:
+    _banner("Demo: OpenTelemetry distributed tracing (Phase 10b, ADR-031)")
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("demo")
+
+    orchestrator = _build_orchestrator(_FailThenSucceedProvider(), tracer=tracer)
+    orchestrator.invoke(_request())
+
+    print("Spans created for one request (with a fallback):")
+    for span in exporter.get_finished_spans():
+        indent = "  " if span.parent is not None else ""
+        attrs = dict(span.attributes or {})
+        print(f"{indent}- {span.name}  {attrs}")
+    print("\n-> Every span attribute is sanitized metadata (application_id, capability,")
+    print("   model_alias, status, latency) -- never raw prompt/response content. No")
+    print("   real OTLP collector is deployed by this project; set")
+    print("   OTEL_EXPORTER_OTLP_ENDPOINT to export these spans somewhere real. See")
+    print("   ADR-031.")
+
+
 _SCENARIOS = {
     "fallback": demo_fallback,
     "idempotency": demo_idempotency,
     "health-degradation": demo_health_degradation,
     "observability": demo_observability,
     "multi-provider-fallback": demo_multi_provider_fallback,
+    "decision-events": demo_decision_events,
+    "tracing": demo_tracing,
 }
 
 

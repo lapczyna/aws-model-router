@@ -162,11 +162,18 @@ Defined in the domain/application layers and implemented by adapters (Phase 2–
 * **Clock** — supplies the current UTC time (testable, injectable; Phase 2).
 * **IdentifierGenerator** — generates request/decision IDs (testable, injectable;
   Phase 2).
+* **DecisionEventPublisher** — publishes a sanitized routing-decision event for one
+  completed request (Phase 10b; `EventBridgeDecisionEventPublisher`, ADR-030).
 
 **ModelHealthRepository** and **MetricsPublisher** remain deferred to Phase 6, alongside
 their first real implementation and consumer — see `PROJECT_PLAN.md`'s "Open
 assumptions" section for why health filtering specifically is not yet wired in even
 though `ModelHealth`/`MODEL_UNHEALTHY` are modeled in the schema.
+
+**Tracer** (`opentelemetry.trace.Tracer`, Phase 10b, ADR-031) is injected the same way
+but is deliberately *not* a project-defined `domain.ports` protocol — OpenTelemetry's
+API package already is the vendor-neutral abstraction; see ADR-031's "Alternatives
+considered" for why wrapping it again was rejected as redundant.
 
 ## Related documents
 

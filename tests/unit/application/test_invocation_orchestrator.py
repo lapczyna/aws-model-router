@@ -108,6 +108,7 @@ def _build_orchestrator(
     decision_repository: Any = None,
     model_health_repository: Any = None,
     metrics_publisher: Any = None,
+    decision_event_publisher: Any = None,
 ) -> InvocationOrchestrator:
     effective_clock = clock or FixedClock(FIXED_NOW)
     route_service = RouteEvaluationService(
@@ -129,6 +130,7 @@ def _build_orchestrator(
         decision_repository=decision_repository,
         model_health_repository=model_health_repository,
         metrics_publisher=metrics_publisher,
+        decision_event_publisher=decision_event_publisher,
         monotonic=lambda: 0.0,
     )
 
@@ -702,6 +704,14 @@ class _RecordingMetricsPublisher:
         self.published.append(result)
 
 
+class _RecordingDecisionEventPublisher:
+    def __init__(self) -> None:
+        self.published: list[Any] = []
+
+    def publish(self, result: Any) -> None:
+        self.published.append(result)
+
+
 def test_health_outcome_recorded_for_each_invocation_attempt() -> None:
     primary = make_model("primary", capability_tags=("balanced-text",))
     fallback = make_model("fallback", capability_tags=("balanced-text",))
@@ -767,3 +777,55 @@ def test_metrics_published_even_when_no_eligible_model() -> None:
 
     assert len(metrics_publisher.published) == 1
     assert metrics_publisher.published[0].decision.selected_model_alias is None
+
+
+def test_decision_event_published_once_per_completed_invocation() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    provider = FakeModelProvider({"model-a": [_response("model-a")]})
+    decision_event_publisher = _RecordingDecisionEventPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        decision_event_publisher=decision_event_publisher,
+    )
+
+    result = orchestrator.invoke(_request())
+
+    assert len(decision_event_publisher.published) == 1
+    assert decision_event_publisher.published[0] is result
+
+
+def test_decision_event_published_even_when_no_eligible_model() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_capabilities=("economical-text",), allowed_model_aliases=("model-a",)
+    )
+    decision_event_publisher = _RecordingDecisionEventPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        FakeModelProvider({}),
+        decision_event_publisher=decision_event_publisher,
+    )
+
+    orchestrator.invoke(_request())
+
+    assert len(decision_event_publisher.published) == 1
+    assert decision_event_publisher.published[0].decision.selected_model_alias is None
+
+
+def test_no_decision_event_publisher_configured_does_not_error() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    provider = FakeModelProvider({"model-a": [_response("model-a")]})
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+    )
+
+    result = orchestrator.invoke(_request())
+
+    assert result.response is not None

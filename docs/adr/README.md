@@ -72,3 +72,5 @@ What else was evaluated, and why was it not chosen?
 | [ADR-027](0027-iac-security-scanning-approach.md) | IaC security scanning — cdk-nag and cfn-lint | Accepted |
 | [ADR-028](0028-fallback-chain-considers-health-excluded-candidates.md) | Fallback chain must apply even when the strategy selects nothing | Accepted |
 | [ADR-029](0029-multi-provider-routing-openai.md) | Multi-provider routing — OpenAI as the second provider | Accepted |
+| [ADR-030](0030-eventbridge-decision-events.md) | EventBridge decision events | Accepted |
+| [ADR-031](0031-opentelemetry-tracing.md) | OpenTelemetry distributed tracing | Accepted |

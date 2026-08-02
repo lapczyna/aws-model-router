@@ -1,8 +1,8 @@
 # Threat model
 
-Scope: `aws-model-router`'s six trust boundaries (`docs/architecture/overview.md`'s
-trust boundary diagram, extended in Phase 10a — see Boundary 6) plus cross-cutting
-concerns. Each threat lists the existing
+Scope: `aws-model-router`'s seven trust boundaries (`docs/architecture/overview.md`'s
+trust boundary diagram, extended in Phase 10a with Boundary 6 and Phase 10b with
+Boundary 7) plus cross-cutting concerns. Each threat lists the existing
 mitigation (with ADR/code references), the residual risk, and a status:
 **Mitigated** (a real, verified control exists), **Accepted** (a real risk, deliberately
 not fully closed, with rationale), or **Deferred** (scoped to a specific future phase).
@@ -59,6 +59,8 @@ the next concrete step, not deferred without a plan.
 | T16 | DynamoDB data tampering via over-broad IAM | Explicit minimal action grants, no `Scan`/`Query`/`UpdateItem` (ADR-022) | None found | Mitigated |
 | T17 | Cross-tenant decision access (`GET /v1/decisions/{decisionId}`) | `applicationId` ownership check (`handle_get_decision`, tested — wrong owner → `403`) | Inherits T2's residual risk (the check compares against the *claimed* `applicationId`, not a verified IAM-bound one) | Mitigated (conditional on T2's status) |
 | T18 | Supply-chain compromise of a Python dependency | Version-pinned (`pyproject.toml`) plus automated scanning: `pip-audit` runs as a required PR check (`.github/workflows/pr.yml`), and Dependabot proposes version-bump PRs weekly (`.github/dependabot.yml`) | A small, tracked set of dev-tooling-only advisories (black/pytest, no fix available inside this project's current version pin) are explicitly ignored with inline justification, not silently — see `docs/operations/ci-cd.md` | Mitigated |
+| T25 | Sensitive content leaking via a published EventBridge decision event (ADR-030, Phase 10b) | `EventBridgeDecisionEventPublisher._build_detail` only ever reads fields off `RoutingDecision` (never `InferenceResult.response`, where real model output lives) — the same metadata-only discipline as `AuditRecord`/`EmfMetricsPublisher` (ADR-008), verified by a dedicated test that plants a secret in the response and confirms it never appears in the published detail | None found in testing | Mitigated |
+| T26 | Unauthorized in-account subscription to the decision events bus | The bus is dedicated (not the shared default bus), but any IAM principal in the same AWS account with `events:PutRule`/`events:PutTargets` permission on it can still subscribe — this project's own Lambda role has no such permission (it only has scoped `PutEvents`), so this is governed by the account's own IAM policy for who can manage EventBridge rules, not a control this router implements | Same class of risk as T12 (policy-file tampering) — standard IAM/account governance, not a router-specific control | Accepted — decision events are already metadata-only (see T25), so an unauthorized in-account subscriber sees the same class of information already visible via CloudWatch Logs Insights to anyone with log-read access |
 
 ## Boundary 5 — Administrative / deploy-time
 
@@ -80,6 +82,18 @@ inside AWS's network boundary.
 | T23 | Prompt/response content leaving the AWS trust boundary entirely when routed to an OpenAI-provider model | TLS in transit (the `openai` SDK's default HTTPS transport); routing to an `openai`-provider model is strictly opt-in per `RoutingPolicy.allowed_model_aliases` — an application never reaches OpenAI unless its policy explicitly allowlists an `openai` catalogue entry, and `policies/applications/multi-provider-demo.yaml` is the only sample policy that does | This project has no control over OpenAI's own data retention/training-use policy for content it receives — that is a vendor agreement/configuration concern (e.g. OpenAI's API data-usage settings), outside this router's own trust boundary and this ADR's scope | Accepted — inherent to offering a non-AWS provider at all, not a gap to close without removing the feature; an operator who cannot accept this should simply not allowlist an `openai` model for that application |
 | T24 | OpenAI API key compromise or leakage | Stored in a dedicated Secrets Manager secret, never a Lambda plaintext env var value ([ADR-029](../adr/0029-multi-provider-routing-openai.md)); `secretsmanager:GetSecretValue` scoped to that one secret's ARN via `Secret.grant_read()`, never a wildcard (verified: `test_openai_secret_grant_is_scoped_to_the_specific_secret_not_wildcard`); the key is fetched once per cold start and only ever passed in-memory to the `openai.OpenAI(...)` client constructor — never logged (the structured-logging attribute whitelist has no field for it, so a call site couldn't log it even by mistake) | No automatic rotation — OpenAI has no rotate-in-place API for Secrets Manager's native rotation Lambdas to call against, so rotation is a manual, documented operational step (`docs/operations/release-process.md`), not an automated one | Mitigated (rotation is manual by necessity, not oversight — see the `AwsSolutions-SMG4` suppression in `infrastructure/cdk_constructs/lambda_construct.py`) |
 
+## Boundary 7 — Router → operator-configured telemetry backend (OpenTelemetry, ADR-031)
+
+A second, independent way data can leave AWS, distinct from Boundary 6: if an operator
+sets `OTEL_EXPORTER_OTLP_ENDPOINT` on the deployed Lambda (never done by this project
+itself — `shared.tracing.configure_tracing` has no processor attached, and no span is
+exported, unless this is explicitly set), span attribute data leaves AWS for whatever
+OTLP-compatible backend that endpoint names.
+
+| ID | Threat | Mitigation | Residual risk | Status |
+|---|---|---|---|---|
+| T27 | Sanitized-but-still-operational metadata (application IDs, capabilities, model aliases, latencies, cost) leaving AWS via exported spans, if an operator configures a real OTLP endpoint | Span attributes are the same sanitized-metadata discipline as logs/metrics/decision events — never raw prompt/response content (verified: no span-attribute-setting code path in `RouteEvaluationService`/`InvocationOrchestrator` reads `InferenceRequest.messages` or `ProviderResponse.message`). Off by default — no endpoint is configured or deployed by this project | This project has no control over the operator-chosen backend's own data handling once an endpoint is configured — a vendor/configuration concern outside this router's own trust boundary, the same shape of residual risk as T23 for OpenAI | Accepted — inherent to offering optional real tracing export at all; an operator who cannot accept a given backend should simply not configure `OTEL_EXPORTER_OTLP_ENDPOINT`, the same reasoning as T23 |
+
 ## Cross-cutting: AI content safety
 
 | ID | Threat | Mitigation | Residual risk | Status |
@@ -89,12 +103,14 @@ inside AWS's network boundary.
 
 ## Summary
 
-24 threats identified across 6 trust boundaries plus AI content safety (T23/T24 added
-Phase 10a for the new router-to-OpenAI boundary). 14 Mitigated (with a real, verifiable
-control — code, test, or ADR-documented architectural constraint), 8 Accepted (a genuine
-residual risk with explicit rationale for not closing it further now), 2 Deferred
-(T21/T22, contingent on the not-yet-built Guardrails integration per ADR-024). No threat
-here is silently unaddressed — every row has a status and a reason.
+27 threats identified across 7 trust boundaries plus AI content safety (T23/T24 added
+Phase 10a for the router-to-OpenAI boundary; T25/T26 added Phase 10b for EventBridge
+decision events; T27 added Phase 10b for the operator-configured OpenTelemetry export
+boundary). 15 Mitigated (with a real, verifiable control — code, test, or
+ADR-documented architectural constraint), 10 Accepted (a genuine residual risk with
+explicit rationale for not closing it further now), 2 Deferred (T21/T22, contingent on
+the not-yet-built Guardrails integration per ADR-024). No threat here is silently
+unaddressed — every row has a status and a reason.
 
 The most significant open item is **T2** (cross-application impersonation via
 `applicationId` spoofing) — already flagged as a known limitation when the

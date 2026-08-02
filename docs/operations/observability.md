@@ -91,3 +91,36 @@ metrics by CloudWatch, with no extra `PutMetricData` API call and no new IAM per
 See ADR-019 for the full rationale, including the one-line-per-metric-point trade-off
 (simpler and more obviously correct than hand-rolled batching, at the cost of more log
 lines than a batched approach).
+
+## Decision events (EventBridge, Phase 10b)
+
+One sanitized `RoutingDecisionCompleted` event is published to the
+`model-router-decisions-{env}` EventBridge bus per completed request (ADR-030) — the
+same trigger points as metrics publishing. Subscribe by adding an EventBridge rule
+targeting this bus (its name is the stack's `DecisionEventsBusName` output); no code
+change in this project is needed. The event `Detail` carries exactly:
+`decisionId`, `applicationId`, `createdAt`, `policyId`, `policyVersion`, `capability`,
+`selectedModelAlias`, `provider`, `fallbackUsed`, `reasonCodes`, `estimatedCostUsd` —
+never raw prompt/response content. A publish failure is logged and swallowed inside the
+publisher; it can never fail the underlying `/v1/inference` request. See
+`scripts/run_demo_scenarios.py --scenario decision-events` for a worked example against
+a fake client, and `docs/demonstrations.md`.
+
+## Distributed tracing (OpenTelemetry, Phase 10b)
+
+Independent of AWS X-Ray (`Tracing.ACTIVE`, still active on the Lambda function): this
+project's own logical operations are instrumented as OpenTelemetry spans (ADR-031) —
+`model_router.evaluate_route` (root span for `POST /v1/routes/evaluate`, or nested under
+`model_router.invoke` when called from `POST /v1/inference`), `model_router.invoke`, and
+one `model_router.invoke_attempt` child span per fallback-chain candidate. Every
+attribute is the same sanitized-metadata discipline as logs/metrics/decision events —
+never raw content.
+
+**No OTLP collector is deployed by this project.** Spans are always created, but with no
+`OTEL_EXPORTER_OTLP_ENDPOINT` set, they're dropped immediately rather than exported
+anywhere — the same "provision the mechanism, a real backend is an operator's
+post-deploy choice" pattern as the OpenAI API key secret and the SNS alarm subscription.
+To actually see traces, set `OTEL_EXPORTER_OTLP_ENDPOINT` on the deployed Lambda
+(pointing at a self-hosted collector, or any OTLP-compatible backend). See
+`scripts/run_demo_scenarios.py --scenario tracing` for a worked example printing the
+real spans one request produces.

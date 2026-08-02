@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 from aws_cdk import Duration, Stack
 from aws_cdk import aws_dynamodb as dynamodb
+from aws_cdk import aws_events as events
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
@@ -75,6 +76,7 @@ class LambdaConstruct(Construct):
         repo_root: Path,
         decisions_table: dynamodb.Table,
         idempotency_table: dynamodb.Table,
+        decision_events_bus: events.EventBus,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -166,6 +168,7 @@ class LambdaConstruct(Construct):
                 "MAX_REQUEST_BODY_BYTES": str(environment_config.max_request_body_bytes),
                 "LOG_LEVEL": "INFO",
                 "ENVIRONMENT_NAME": environment_config.env_name,
+                "DECISION_EVENTS_BUS_NAME": decision_events_bus.event_bus_name,
                 **(
                     {"OPENAI_API_KEY_SECRET_ARN": openai_secret.secret_arn}
                     if openai_secret is not None
@@ -177,6 +180,10 @@ class LambdaConstruct(Construct):
 
         if openai_secret is not None:
             openai_secret.grant_read(self.function)
+
+        # Scoped to exactly this bus's ARN (ADR-030) — grant_put_events_to, not a
+        # hand-rolled PolicyStatement with resources=["*"] or the default bus.
+        decision_events_bus.grant_put_events_to(self.function)
 
         # Explicit, minimal action grants (ADR-022) rather than `grant_read_write_data()`
         # — that helper grants Scan/Query/BatchGetItem/BatchWriteItem/

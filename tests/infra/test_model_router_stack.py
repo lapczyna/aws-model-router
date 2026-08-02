@@ -207,6 +207,22 @@ def test_openai_secret_grant_is_scoped_to_the_specific_secret_not_wildcard(
         )
 
 
+def test_decision_events_bus_is_created(dev_stack: "SynthesizedStack") -> None:
+    dev_stack.template.resource_count_is("AWS::Events::EventBus", 1)
+    dev_stack.template.has_resource_properties(
+        "AWS::Events::EventBus", {"Name": "model-router-decisions-dev"}
+    )
+
+
+def test_eventbridge_put_events_grant_is_scoped_not_wildcard(
+    dev_stack: "SynthesizedStack",
+) -> None:
+    for statement in _iam_statements(dev_stack, action_prefix="events:"):
+        resources = _as_list(statement["Resource"])
+        assert "*" not in resources
+        assert resources  # an events statement exists at all
+
+
 def test_dynamodb_grants_are_scoped_to_the_exact_actions_each_adapter_uses(
     dev_stack: "SynthesizedStack",
 ) -> None:

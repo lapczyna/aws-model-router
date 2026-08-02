@@ -382,6 +382,54 @@ rotate-in-place API for Secrets Manager's native rotation to call.
       release-process docs updated with real procedures, not just a note
 - [x] Committed and pushed
 
+#### Phase 10b — Operational depth: EventBridge decision events + OpenTelemetry tracing — Complete
+Requested explicitly (asked which Phase 10 item to start next; user chose the
+"operational depth" cluster). Two independent additions:
+
+* **EventBridge decision events** ([ADR-030](docs/adr/0030-eventbridge-decision-events.md)):
+  `InvocationOrchestrator` gains an optional `decision_event_publisher` collaborator,
+  same shape as `MetricsPublisher`. `EventBridgeDecisionEventPublisher` publishes one
+  sanitized `RoutingDecisionCompleted` event per completed request to a dedicated
+  EventBridge bus (`EventsConstruct`, provisioned unconditionally — unlike the OpenAI
+  secret, a bus has no idle cost), scoped `events:PutEvents` via `grant_put_events_to`.
+  Publish failures are caught and logged inside the adapter, never propagated — telemetry
+  must never fail the underlying request.
+* **OpenTelemetry tracing** ([ADR-031](docs/adr/0031-opentelemetry-tracing.md)):
+  `RouteEvaluationService`/`InvocationOrchestrator` accept an optional injected `Tracer`,
+  defaulting to the process-global one. Three span types
+  (`model_router.evaluate_route`/`invoke`/`invoke_attempt`), sanitized attributes only.
+  `shared.tracing.configure_tracing()` installs a `TracerProvider` at Lambda cold start;
+  with no `OTEL_EXPORTER_OTLP_ENDPOINT` set (the default — no collector is deployed by
+  this project), spans are created but never exported.
+
+Along the way: found and fixed a real test-isolation bug during this phase's own
+verification — OpenTelemetry's global `TracerProvider` can only be installed once per
+process, so an un-patched test calling `configure_tracing()` with a real-looking OTLP
+endpoint silently became the global provider for the *entire remaining test suite*,
+observed as background export-retry noise leaking into unrelated tests. Fixed by
+patching `trace.set_tracer_provider` to a no-op in `shared.tracing`'s own tests, and by
+having every span-behavior test inject its own locally-constructed `Tracer` rather than
+ever relying on global state — consistent with this project's existing
+dependency-injection discipline (`Clock`, `IdentifierGenerator`, etc.).
+
+New threat-model entries: T25/T26 (EventBridge event content/subscription — Boundary 4)
+and T27 (a new Boundary 7 — OpenTelemetry span export leaving AWS only if an operator
+configures a real OTLP endpoint, mirroring T23's reasoning for OpenAI).
+
+**DoD:**
+- [x] `DecisionEventPublisher` port + `EventBridgeDecisionEventPublisher`, tested with a
+      fake client; sanitized-payload discipline verified with a dedicated secret-leak test
+- [x] CDK: dedicated EventBridge bus, scoped IAM grant, cdk-nag/cfn-lint clean, infra
+      assertion tests (`test_decision_events_bus_is_created`,
+      `test_eventbridge_put_events_grant_is_scoped_not_wildcard`)
+- [x] OpenTelemetry spans instrumented in both application services, tested against a
+      real `TracerProvider` + `InMemorySpanExporter` with explicit dependency injection
+      (never the process-global tracer in tests)
+- [x] Real demo scenarios: `scripts/run_demo_scenarios.py --scenario decision-events`
+      and `--scenario tracing`, both printing real, verified output
+- [x] Threat model updated (T25–T27); observability guide updated with both new sections
+- [ ] Committed and pushed
+
 ## Completed milestones
 
 | Phase | Status | Commit / tag |
@@ -396,12 +444,13 @@ rotate-in-place API for Secrets Manager's native rotation to call.
 | Phase 8 — CI/CD with GitHub Actions | Complete | `fc9fe49` |
 | Phase 9 — Performance, load testing, and portfolio polish | Complete | `6063cb4` |
 | Phase 10a — Multi-provider routing (OpenAI) | Complete | `f0e9a00` |
+| Phase 10b — EventBridge decision events + OpenTelemetry tracing | Complete | *(pending commit)* |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 10b+ | Any other Phase 10 item (optional — explicit request only per item; none scoped yet) |
+| 10c+ | Any other Phase 10 item (optional — explicit request only per item; none scoped yet) |
 
 ## Open assumptions / decisions carried forward
 

@@ -142,3 +142,19 @@ class MetricsPublisher(Protocol):
     """
 
     def publish(self, result: InferenceResult) -> None: ...
+
+
+class DecisionEventPublisher(Protocol):
+    """Publishes a sanitized routing-decision event for one completed request, so an
+    external system (analytics, governance, alerting) can subscribe instead of polling
+    `GET /v1/decisions/{decisionId}` (ADR-030, Phase 10b). Same shape convention as
+    `MetricsPublisher` — takes the whole `InferenceResult`, the publisher decides what
+    to include.
+
+    Never includes raw prompt/response content (ADR-008) — the same metadata-only
+    discipline as `AuditRecord`/`MetricsPublisher`. A failure to publish an event must
+    never fail the underlying request; implementations are responsible for their own
+    error containment, the same way `EmfMetricsPublisher` cannot itself fail loudly.
+    """
+
+    def publish(self, result: InferenceResult) -> None: ...

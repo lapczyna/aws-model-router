@@ -6,6 +6,8 @@ fully-explained `RoutingDecision` — exactly what `POST /v1/routes/evaluate` wi
 once the HTTP API exists (Phase 5).
 """
 
+from opentelemetry.trace import Tracer
+
 from domain.candidates import RouteCandidate
 from domain.decision import RoutingDecision
 from domain.filtering import build_route_candidates
@@ -23,6 +25,7 @@ from domain.reason_codes import RoutingReasonCode, sort_reason_codes
 from domain.requests import InferenceRequest
 from domain.requirements import resolve_effective_requirements
 from domain.strategy import RouteSelection, RoutingContext, get_strategy
+from shared.tracing import get_tracer
 
 
 class RouteEvaluationService:
@@ -35,6 +38,7 @@ class RouteEvaluationService:
         clock: Clock,
         identifier_generator: IdentifierGenerator,
         model_health_repository: ModelHealthRepository | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         self._policy_repository = policy_repository
         self._model_catalogue = model_catalogue
@@ -43,9 +47,11 @@ class RouteEvaluationService:
         self._clock = clock
         self._identifier_generator = identifier_generator
         self._model_health_repository = model_health_repository
+        self._tracer = tracer if tracer is not None else get_tracer()
 
     def evaluate(self, request: InferenceRequest) -> RoutingDecision:
-        """Evaluate the route for `request`.
+        """Evaluate the route for `request` (wrapped in a `model_router.evaluate_route`
+        span — ADR-031; see `_evaluate` for the actual routing logic).
 
         Raises `domain.errors.RoutingPolicyNotFoundError` if no policy can be resolved
         for the application, and `domain.errors.ConfigurationError` if the resolved
@@ -53,6 +59,20 @@ class RouteEvaluationService:
         is not an error — it is returned as a decision with no selected model and a
         `NO_ELIGIBLE_MODEL` or `REQUIRED_CAPABILITY_UNAVAILABLE` reason code.
         """
+        with self._tracer.start_as_current_span("model_router.evaluate_route") as span:
+            span.set_attribute("model_router.application_id", request.application_id)
+            span.set_attribute("model_router.capability", request.requirements.capability)
+            decision = self._evaluate(request)
+            span.set_attribute("model_router.decision_id", decision.decision_id)
+            span.set_attribute(
+                "model_router.selected_model_alias", decision.selected_model_alias or ""
+            )
+            span.set_attribute(
+                "model_router.reason_codes", [code.value for code in decision.reason_codes]
+            )
+            return decision
+
+    def _evaluate(self, request: InferenceRequest) -> RoutingDecision:
         policy = self._policy_repository.resolve(request.application_id)
 
         capability = request.requirements.capability

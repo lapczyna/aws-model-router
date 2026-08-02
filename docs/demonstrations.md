@@ -1,10 +1,12 @@
 # Sample demonstrations
 
-Eleven concrete, reproducible demonstrations of `aws-model-router`'s behavior — the
+Thirteen concrete, reproducible demonstrations of `aws-model-router`'s behavior — the
 capabilities a reviewer would most want to see working, each runnable locally without
 AWS credentials (except where noted) using the exact commands below. Every command here
 has been run against this repository; none is aspirational. (The first ten were the
-original Phase 9 set; #11 was added in Phase 10a alongside multi-provider routing.)
+original Phase 9 set; #11 was added in Phase 10a alongside multi-provider routing; #12
+and #13 were added in Phase 10b alongside EventBridge decision events and OpenTelemetry
+tracing.)
 
 Setup, once:
 
@@ -148,9 +150,37 @@ catalogued model's `provider` field — proof that ADR-002's provider-independen
 holds for a genuinely different vendor, not just a second Bedrock model family. See
 [ADR-029](adr/0029-multi-provider-routing-openai.md).
 
+## 12. EventBridge decision events
+
+```bash
+python scripts/run_demo_scenarios.py --scenario decision-events
+```
+
+One sanitized `RoutingDecisionCompleted` event is published to EventBridge per completed
+request, against a fake client so the exact event `Detail` is printed to the console —
+decision/policy IDs, capability, selected model, cost, never raw prompt/response content.
+An external system subscribes by adding a rule to the deployed
+`model-router-decisions-{env}` bus, no code change needed. See
+[ADR-030](adr/0030-eventbridge-decision-events.md).
+
+## 13. OpenTelemetry distributed tracing
+
+```bash
+python scripts/run_demo_scenarios.py --scenario tracing
+```
+
+Runs one request that throttles on its preferred model and falls back, against a real,
+locally-constructed `TracerProvider` + `InMemorySpanExporter`, and prints every span
+created: `model_router.evaluate_route`, `model_router.invoke`, and one
+`model_router.invoke_attempt` per fallback-chain candidate, correctly nested. No OTLP
+collector is deployed by this project — set `OTEL_EXPORTER_OTLP_ENDPOINT` on a real
+deployment to export these spans somewhere real. See
+[ADR-031](adr/0031-opentelemetry-tracing.md).
+
 ## Requirements traceability
 
 `docs/requirements.md` is the authoritative functional/non-functional requirements list;
-these ten demonstrations are chosen to make the most externally-visible, differentiating
-behaviors concretely observable, not to enumerate every requirement individually. See
-`PROJECT_PLAN.md` for the phase-by-phase history behind each capability shown above.
+these thirteen demonstrations are chosen to make the most externally-visible,
+differentiating behaviors concretely observable, not to enumerate every requirement
+individually. See `PROJECT_PLAN.md` for the phase-by-phase history behind each
+capability shown above.

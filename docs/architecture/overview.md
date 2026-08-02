@@ -79,9 +79,11 @@ with `OpenAIModelProvider` (ADR-029).
   `docs/security/threat-model.md`'s Boundary 6).
 * **Fallback handling** — on an eligible failure, selects the next approved candidate per
   the application's fallback policy, bounded by a maximum attempt count.
-* **Audit, metrics, and traces** — every decision and invocation attempt is recorded as
-  sanitized metadata; operational metrics are published with low-cardinality dimensions;
-  AWS X-Ray traces the request end to end where enabled.
+* **Audit, metrics, events, and traces** — every decision and invocation attempt is
+  recorded as sanitized metadata; operational metrics are published with low-cardinality
+  dimensions; a sanitized decision event is published to EventBridge for external
+  subscribers (ADR-030); AWS X-Ray and OpenTelemetry (ADR-031, exported only if an
+  operator configures a real OTLP endpoint) both trace the request, independently.
 
 ## Component diagram
 
@@ -111,12 +113,14 @@ graph TD
         ConfigRepo["Config / Policy Repository"]
         DecisionRepo["Routing Decision & Idempotency Store"]
         MetricsPub["Metrics Publisher"]
+        EventsPub["Decision Event Publisher"]
     end
 
     subgraph AWSServices["AWS Managed Services"]
         Bedrock["Amazon Bedrock Runtime (Converse API)"]
         DynamoDB[("Amazon DynamoDB")]
         SecretsMgr[("AWS Secrets Manager\n(OpenAI API key)")]
+        EventBridge[("Amazon EventBridge\n(decision events bus)")]
         CWLogs["Amazon CloudWatch Logs"]
         CWMetrics["Amazon CloudWatch Metrics"]
         XRay["AWS X-Ray"]
@@ -147,6 +151,10 @@ graph TD
     Strategy --> MetricsPub
     Composite --> MetricsPub
     MetricsPub --> CWMetrics
+
+    Strategy --> EventsPub
+    Composite --> EventsPub
+    EventsPub --> EventBridge
 
     Auth --> CWLogs
     Strategy --> CWLogs

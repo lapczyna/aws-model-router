@@ -30,6 +30,9 @@ from adapters.config.local_model_catalogue import LocalFileModelCatalogue
 from adapters.config.local_policy_repository import LocalFileRoutingPolicyRepository
 from adapters.dynamodb.dynamodb_decision_repository import DynamoDbRoutingDecisionRepository
 from adapters.dynamodb.dynamodb_idempotency_store import DynamoDbIdempotencyStore
+from adapters.events.eventbridge_decision_event_publisher import (
+    EventBridgeDecisionEventPublisher,
+)
 from adapters.memory.in_memory_model_health_repository import InMemoryModelHealthRepository
 from adapters.metrics.emf_metrics_publisher import EmfMetricsPublisher
 from adapters.openai.openai_model_provider import OpenAIModelProvider
@@ -54,6 +57,7 @@ from handlers.request_mapping import (
 from shared.clock import SystemClock
 from shared.identifiers import Uuid4IdentifierGenerator
 from shared.structured_logging import configure_logging
+from shared.tracing import configure_tracing
 
 logger = logging.getLogger()
 
@@ -121,6 +125,18 @@ def build_services() -> HandlerServices:
         table=dynamodb.Table(os.environ["IDEMPOTENCY_TABLE_NAME"])
     )
 
+    decision_event_publisher = None
+    decision_events_bus_name = os.environ.get("DECISION_EVENTS_BUS_NAME")
+    if decision_events_bus_name:
+        # Present on every real deployment (`infrastructure/cdk_constructs/
+        # lambda_construct.py` provisions the bus unconditionally — ADR-030); optional
+        # here only so `--use-real-services` local testing against a deployed stack's
+        # tables doesn't also require setting this to exercise something unrelated.
+        events_client = boto3.client("events", region_name=region)
+        decision_event_publisher = EventBridgeDecisionEventPublisher(
+            client=events_client, event_bus_name=decision_events_bus_name
+        )
+
     orchestrator = InvocationOrchestrator(
         route_evaluation_service=route_service,
         policy_repository=policy_repository,
@@ -131,6 +147,7 @@ def build_services() -> HandlerServices:
         decision_repository=decision_repository,
         model_health_repository=model_health_repository,
         metrics_publisher=EmfMetricsPublisher(environment=environment),
+        decision_event_publisher=decision_event_publisher,
     )
     return HandlerServices(
         catalogue=catalogue,
@@ -378,5 +395,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     global _SERVICES
     if _SERVICES is None:
         configure_logging()
+        configure_tracing()
         _SERVICES = build_services()
     return dispatch(event, _SERVICES)

@@ -12,18 +12,21 @@ architecture is provider-independent by design (ADR-002) — a `CompositeModelPr
 dispatches each request to the correct adapter based on the catalogued model's
 `provider` field, and neither concrete adapter has any awareness the other exists.
 
-> **Status: Phase 10a — Multi-provider routing.** `OpenAIModelProvider`
-> (`src/adapters/openai/`) is a real second `ModelProvider`, dispatched to by a new
-> `CompositeModelProvider` — proof that ADR-002's provider-independence claim holds for
-> a genuinely different vendor, not just a second Bedrock model family. See
-> [ADR-029](docs/adr/0029-multi-provider-routing-openai.md). A single fallback chain can
-> now span two providers (`policies/applications/multi-provider-demo.yaml`), and the
-> threat model gained a new trust boundary (T23/T24) for the first request path that
-> leaves AWS entirely. Also fixed a real, previously-latent bug found while building
-> this: `_load_bedrock_resource_arns` would have built a meaningless Bedrock IAM ARN for
-> a non-Bedrock catalogue entry had it not been filtered by provider first. See
-> [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap, including Phase 9's
-> ten reproducible demonstrations and verified architecture review.
+> **Status: Phase 10b — EventBridge decision events + OpenTelemetry tracing.** Every
+> completed request now publishes a sanitized `RoutingDecisionCompleted` event to a
+> dedicated EventBridge bus ([ADR-030](docs/adr/0030-eventbridge-decision-events.md)) and
+> creates OpenTelemetry spans (`model_router.evaluate_route`/`invoke`/`invoke_attempt`)
+> tracing the request independently of AWS X-Ray
+> ([ADR-031](docs/adr/0031-opentelemetry-tracing.md)) — no OTLP collector is deployed by
+> this project; set `OTEL_EXPORTER_OTLP_ENDPOINT` to export spans somewhere real. Found
+> and fixed a real test-isolation bug along the way: OpenTelemetry's global
+> `TracerProvider` can only be installed once per process, so an un-patched test was
+> silently leaking a real, network-attempting provider into the rest of the suite.
+> Phase 10a added **OpenAI** as a second provider alongside Bedrock
+> ([ADR-029](docs/adr/0029-multi-provider-routing-openai.md)) — a `CompositeModelProvider`
+> dispatches each request to the correct adapter, and a single fallback chain can span
+> both providers. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap,
+> including Phase 9's ten reproducible demonstrations and verified architecture review.
 
 This is not a chatbot UI and not a tutorial wrapper around a single Lambda function. It
 is built as a production-shaped AWS reference implementation, emphasizing architecture,
@@ -36,11 +39,12 @@ This project exists to demonstrate how I approach building a real AWS system, no
 to call a foundation model. If you're reviewing this as a portfolio piece, the fastest
 path in:
 
-* **[`docs/demonstrations.md`](docs/demonstrations.md)** — eleven concrete, reproducible
-  demonstrations (routing decisions, fallback, experimentation, idempotency, cost
-  rejection, health degradation, a full HTTP round trip, observability, a security
-  abuse-case test, CI/CD catching a real bug, and cross-provider fallback), each with the
-  exact command to run it yourself, no AWS credentials needed for ten of the eleven.
+* **[`docs/demonstrations.md`](docs/demonstrations.md)** — thirteen concrete,
+  reproducible demonstrations (routing decisions, fallback, experimentation,
+  idempotency, cost rejection, health degradation, a full HTTP round trip,
+  observability, a security abuse-case test, CI/CD catching a real bug, cross-provider
+  fallback, EventBridge decision events, and OpenTelemetry tracing), each with the exact
+  command to run it yourself, no AWS credentials needed for twelve of the thirteen.
 * **[`docs/architecture/final-review.md`](docs/architecture/final-review.md)** — a
   verified (not asserted) end-to-end architecture review: what was checked and how,
   including a real defect the review process itself caught and fixed
@@ -241,6 +245,15 @@ for `cdk deploy`/`cdk destroy` usage and what `RemovalPolicy.RETAIN` means for `
   rate, no-eligible-model, estimated-spend guidance), all notifying one SNS topic —
   subscribe your own endpoint post-deploy (`docs/operations/runbook.md`); no
   placeholder/fabricated endpoint is created for you.
+* **EventBridge decision events** (ADR-030, Phase 10b): one sanitized
+  `RoutingDecisionCompleted` event per completed request, published to a dedicated
+  `model-router-decisions-{env}` bus — subscribe with an EventBridge rule, no code
+  change needed. Publish failures are caught and logged, never able to fail the
+  underlying request.
+* **OpenTelemetry tracing** (ADR-031, Phase 10b): `model_router.evaluate_route`/
+  `invoke`/`invoke_attempt` spans, independent of AWS X-Ray. No OTLP collector is
+  deployed by this project — spans are created but dropped unless an operator sets
+  `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
 Full guides: [`docs/operations/observability.md`](docs/operations/observability.md)
 (logs/metrics/dashboard reference), [`docs/operations/alarm-response.md`](docs/operations/alarm-response.md)
@@ -251,7 +264,7 @@ Full guides: [`docs/operations/observability.md`](docs/operations/observability.
 ## Security and resilience hardening
 
 * **Threat model** ([`docs/security/threat-model.md`](docs/security/threat-model.md)):
-  22 threats across the 5 trust boundaries plus AI content safety, each with a
+  27 threats across 7 trust boundaries plus AI content safety, each with a
   mitigation, residual risk, and status. The one significant open finding — a caller
   can claim any `applicationId` in the request body, since IAM proves identity, not a
   binding to a specific application (ADR-015) — now has a real detective control
@@ -378,6 +391,8 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [027](docs/adr/0027-iac-security-scanning-approach.md) | IaC security scanning — cdk-nag and cfn-lint |
 | [028](docs/adr/0028-fallback-chain-considers-health-excluded-candidates.md) | Fallback chain must apply even when the strategy selects nothing |
 | [029](docs/adr/0029-multi-provider-routing-openai.md) | Multi-provider routing — OpenAI as the second provider |
+| [030](docs/adr/0030-eventbridge-decision-events.md) | EventBridge decision events |
+| [031](docs/adr/0031-opentelemetry-tracing.md) | OpenTelemetry distributed tracing |
 
 ## Repository structure
 
@@ -406,7 +421,8 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── config.py
 │   ├── bundling.py
 │   ├── stacks/               # model_router_stack.py, github_oidc_stack.py
-│   └── cdk_constructs/       # storage (DynamoDB), lambda, api gateway, observability constructs
+│   └── cdk_constructs/       # storage (DynamoDB), events (EventBridge), lambda, api gateway,
+│                             # observability constructs
 ├── policies/                # Version-controlled routing policy & model catalogue configuration
 ├── scripts/                 # evaluate_route.py, invoke_lambda_locally.py, bedrock/openai_live_smoke_test.py,
 │                             # benchmark_routing.py, cost_comparison_report.py, run_demo_scenarios.py
@@ -414,9 +430,11 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 │   ├── domain/               # Pure Python domain models, routing strategies, reason codes
 │   ├── application/          # Orchestration: validation → policy → filter → cost → strategy → invoke
 │   ├── adapters/              # BedrockModelProvider, OpenAIModelProvider, CompositeModelProvider,
-│   │                          # DynamoDB repositories, in-memory health, EMF metrics, common/ (shared)
+│   │                          # DynamoDB repositories, in-memory health, EMF metrics, events/
+│   │                          # (EventBridge), common/ (shared retry/resolution logic)
 │   ├── handlers/              # Thin AWS Lambda entry point (api_handler.py)
-│   └── shared/                 # Clock, IdentifierGenerator, structured JSON logging
+│   └── shared/                 # Clock, IdentifierGenerator, structured JSON logging, OpenTelemetry
+│                                # tracing config
 ├── tests/
 │   ├── contract/             # Provider/API contract tests
 │   ├── infra/                 # CDK template-assertion tests (pytest.mark.infra, opt-in)
@@ -518,8 +536,9 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 7 | Security and resilience hardening |
 | 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |
 | 9 | Performance, load testing, and portfolio polish |
-| 10a | Multi-provider routing — OpenAI *(this phase)* |
-| 10b+ | Any other Phase 10 item *(optional, explicit request only per item)* |
+| 10a | Multi-provider routing — OpenAI |
+| 10b | EventBridge decision events + OpenTelemetry tracing *(this phase)* |
+| 10c+ | Any other Phase 10 item *(optional, explicit request only per item)* |
 
 ## What this project deliberately does not do
 
