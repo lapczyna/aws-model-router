@@ -28,9 +28,7 @@ pytestmark = pytest.mark.unit
 class FakeBedrockRuntimeClient:
     """Returns/raises each item in `responses`, in order, one per `.converse()` call."""
 
-    def __init__(
-        self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()
-    ) -> None:
+    def __init__(self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()) -> None:
         self._responses = list(responses)
         self._stream_responses = list(stream_responses)
         self.calls: list[dict[str, Any]] = []
@@ -352,9 +350,7 @@ def test_router_alias_pointing_to_another_router_alias_is_rejected() -> None:
 
 
 def test_invoke_stream_yields_deltas_then_final_chunk() -> None:
-    client = FakeBedrockRuntimeClient(
-        stream_responses=[{"stream": _stream_events("hello there")}]
-    )
+    client = FakeBedrockRuntimeClient(stream_responses=[{"stream": _stream_events("hello there")}])
     provider = _provider(client)
 
     chunks = list(provider.invoke_stream(_request()))
@@ -406,9 +402,7 @@ def test_invoke_stream_throttling_retries_stream_start_then_succeeds() -> None:
 
 
 def test_invoke_stream_exhausts_retries_before_first_chunk() -> None:
-    client = FakeBedrockRuntimeClient(
-        stream_responses=[_client_error("ThrottlingException")] * 3
-    )
+    client = FakeBedrockRuntimeClient(stream_responses=[_client_error("ThrottlingException")] * 3)
     provider = _provider(client, retry_policy=RetryPolicy(max_attempts=3))
 
     with pytest.raises(ProviderError) as exc_info:

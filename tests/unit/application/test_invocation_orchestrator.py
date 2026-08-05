@@ -89,7 +89,9 @@ class FakeStreamingModelProvider:
         self.calls: list[str] = []
 
     def invoke(self, request: Any) -> ProviderResponse:
-        raise AssertionError("FakeStreamingModelProvider.invoke should never be called by invoke_stream()")
+        raise AssertionError(
+            "FakeStreamingModelProvider.invoke should never be called by invoke_stream()"
+        )
 
     def invoke_stream(self, request: Any) -> Iterator[ProviderResponseChunk]:
         self.calls.append(request.model_alias)

@@ -36,9 +36,7 @@ class _FakeCompletions:
     queue, mirroring how `FakeBedrockRuntimeClient` separates `.converse()` from
     `.converse_stream()`."""
 
-    def __init__(
-        self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()
-    ) -> None:
+    def __init__(self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()) -> None:
         self._responses = list(responses)
         self._stream_responses = list(stream_responses)
         self.calls: list[dict[str, Any]] = []
@@ -65,9 +63,7 @@ class _FakeCompletions:
 class FakeOpenAIClient:
     """Mimics `openai.OpenAI`'s `.chat.completions.create(...)` attribute path."""
 
-    def __init__(
-        self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()
-    ) -> None:
+    def __init__(self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()) -> None:
         self._completions = _FakeCompletions(responses, stream_responses)
         self.chat = type("_Chat", (), {"completions": self._completions})()
 
@@ -109,9 +105,7 @@ def _stream_chunks(text: str = "hello there") -> list[ChatCompletionChunk]:
             object="chat.completion.chunk",
             created=0,
             model="gpt-4o-mini",
-            choices=[
-                ChunkChoice(index=0, delta=ChoiceDelta(content=text), finish_reason="stop")
-            ],
+            choices=[ChunkChoice(index=0, delta=ChoiceDelta(content=text), finish_reason="stop")],
         ),
         ChatCompletionChunk(
             id="chatcmpl-fake",

@@ -145,9 +145,7 @@ def iter_chat_completion_stream_chunks(
             output_tokens = chunk.usage.completion_tokens
 
     if finish_reason_raw is None or input_tokens is None or output_tokens is None:
-        raise ProviderError(
-            _MALFORMED_RESPONSE_MESSAGE, category=ProviderErrorCategory.PERMANENT
-        )
+        raise ProviderError(_MALFORMED_RESPONSE_MESSAGE, category=ProviderErrorCategory.PERMANENT)
 
     yield ProviderResponseChunk(
         is_final=True,

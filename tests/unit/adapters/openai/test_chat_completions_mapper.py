@@ -114,21 +114,13 @@ def test_iter_chat_completion_stream_chunks_missing_finish_reason_is_malformed()
 
 def test_iter_chat_completion_stream_chunks_missing_usage_is_malformed() -> None:
     with pytest.raises(ProviderError) as exc_info:
-        list(
-            iter_chat_completion_stream_chunks(
-                [_content_chunk("hi", finish_reason="stop")]
-            )
-        )
+        list(iter_chat_completion_stream_chunks([_content_chunk("hi", finish_reason="stop")]))
     assert exc_info.value.category is ProviderErrorCategory.PERMANENT
 
 
 def test_iter_chat_completion_stream_chunks_error_never_leaks_response_content() -> None:
     with pytest.raises(ProviderError) as exc_info:
-        list(
-            iter_chat_completion_stream_chunks(
-                [_content_chunk("TOP-SECRET-MODEL-OUTPUT")]
-            )
-        )
+        list(iter_chat_completion_stream_chunks([_content_chunk("TOP-SECRET-MODEL-OUTPUT")]))
     assert "TOP-SECRET-MODEL-OUTPUT" not in str(exc_info.value)
 
 
