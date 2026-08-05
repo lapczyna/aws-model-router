@@ -476,7 +476,7 @@ phase, unlike 10a/10b.
 - [x] Unit tests for every layer (adapters, mappers, composite dispatch, orchestrator
       fallback/persistence semantics); full suite, ruff, and mypy all clean
 - [x] ADR-032 documents the design and the deliberately-deferred public-endpoint question
-- [ ] Committed and pushed
+- [x] Committed and pushed
 
 ## Completed milestones
 
@@ -493,7 +493,7 @@ phase, unlike 10a/10b.
 | Phase 9 — Performance, load testing, and portfolio polish | Complete | `6063cb4` |
 | Phase 10a — Multi-provider routing (OpenAI) | Complete | `f0e9a00` |
 | Phase 10b — EventBridge decision events + OpenTelemetry tracing | Complete | `59d6710` |
-| Phase 10c — Streaming model responses (domain/adapter/orchestrator layers) | Complete | *(pending commit)* |
+| Phase 10c — Streaming model responses (domain/adapter/orchestrator layers) | Complete | `e0f9e80` |
 
 ## Remaining milestones
 
