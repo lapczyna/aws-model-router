@@ -12,17 +12,24 @@ architecture is provider-independent by design (ADR-002) — a `CompositeModelPr
 dispatches each request to the correct adapter based on the catalogued model's
 `provider` field, and neither concrete adapter has any awareness the other exists.
 
-> **Status: Phase 10b — EventBridge decision events + OpenTelemetry tracing.** Every
-> completed request now publishes a sanitized `RoutingDecisionCompleted` event to a
-> dedicated EventBridge bus ([ADR-030](docs/adr/0030-eventbridge-decision-events.md)) and
-> creates OpenTelemetry spans (`model_router.evaluate_route`/`invoke`/`invoke_attempt`)
-> tracing the request independently of AWS X-Ray
+> **Status: Phase 10c — Streaming model responses.** `StreamingModelProvider` now has
+> real Bedrock (`ConverseStream`) and OpenAI (Chat Completions `stream=True`)
+> implementations, dispatched through `CompositeModelProvider` and orchestrated
+> end-to-end by `InvocationOrchestrator.invoke_stream`
+> ([ADR-032](docs/adr/0032-streaming-model-responses.md)): fallback across the candidate
+> chain is only attempted while establishing a stream — once a single chunk has reached
+> the caller, the model choice is final, and a mid-stream failure propagates instead of
+> silently retrying elsewhere. The public HTTP API is unchanged by this phase: API
+> Gateway's REST API buffers Lambda responses and can't pass a stream through to a
+> caller, so a real streaming endpoint needs a separate Lambda Function URL
+> (`InvokeWithResponseStream`) ingress path with its own IAM auth story — deliberately
+> scoped out of this phase rather than half-built.
+>
+> Phase 10b added EventBridge decision events
+> ([ADR-030](docs/adr/0030-eventbridge-decision-events.md)) and OpenTelemetry tracing
 > ([ADR-031](docs/adr/0031-opentelemetry-tracing.md)) — no OTLP collector is deployed by
-> this project; set `OTEL_EXPORTER_OTLP_ENDPOINT` to export spans somewhere real. Found
-> and fixed a real test-isolation bug along the way: OpenTelemetry's global
-> `TracerProvider` can only be installed once per process, so an un-patched test was
-> silently leaking a real, network-attempting provider into the rest of the suite.
-> Phase 10a added **OpenAI** as a second provider alongside Bedrock
+> this project; set `OTEL_EXPORTER_OTLP_ENDPOINT` to export spans somewhere real. Phase
+> 10a added **OpenAI** as a second provider alongside Bedrock
 > ([ADR-029](docs/adr/0029-multi-provider-routing-openai.md)) — a `CompositeModelProvider`
 > dispatches each request to the correct adapter, and a single fallback chain can span
 > both providers. See [`PROJECT_PLAN.md`](PROJECT_PLAN.md) for the full phased roadmap,
@@ -161,6 +168,12 @@ invocation is available only via the explicitly opt-in
 [`scripts/bedrock_live_smoke_test.py`](scripts/bedrock_live_smoke_test.py) /
 [`scripts/openai_live_smoke_test.py`](scripts/openai_live_smoke_test.py) (env-flag +
 `--confirm-cost` gated, never run by CI).
+
+Both adapters also implement the optional `domain.ports.StreamingModelProvider` protocol
+(`invoke_stream`, via Bedrock's `ConverseStream` and OpenAI's `stream=True`,
+ADR-032/Phase 10c), dispatched the same way through `CompositeModelProvider`. This is a
+capability, not (yet) a public API — `POST /v1/inference` is unaffected; see the status
+banner above for why.
 
 ## Fallback, experimentation, and idempotency
 
@@ -393,6 +406,7 @@ Significant, hard-to-reverse decisions are recorded as ADRs in [`docs/adr/`](doc
 | [029](docs/adr/0029-multi-provider-routing-openai.md) | Multi-provider routing — OpenAI as the second provider |
 | [030](docs/adr/0030-eventbridge-decision-events.md) | EventBridge decision events |
 | [031](docs/adr/0031-opentelemetry-tracing.md) | OpenTelemetry distributed tracing |
+| [032](docs/adr/0032-streaming-model-responses.md) | Streaming model responses |
 
 ## Repository structure
 
@@ -537,8 +551,9 @@ Development proceeds in explicit, independently-reviewable phases — see
 | 8 | CI/CD with GitHub Actions (OIDC, no static AWS keys) |
 | 9 | Performance, load testing, and portfolio polish |
 | 10a | Multi-provider routing — OpenAI |
-| 10b | EventBridge decision events + OpenTelemetry tracing *(this phase)* |
-| 10c+ | Any other Phase 10 item *(optional, explicit request only per item)* |
+| 10b | EventBridge decision events + OpenTelemetry tracing |
+| 10c | Streaming model responses (domain/adapter/orchestrator layers) *(this phase)* |
+| 10d+ | Any other Phase 10 item, including a public streaming HTTP endpoint *(optional, explicit request only per item)* |
 
 ## What this project deliberately does not do
 
