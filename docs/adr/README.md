@@ -74,3 +74,4 @@ What else was evaluated, and why was it not chosen?
 | [ADR-029](0029-multi-provider-routing-openai.md) | Multi-provider routing — OpenAI as the second provider | Accepted |
 | [ADR-030](0030-eventbridge-decision-events.md) | EventBridge decision events | Accepted |
 | [ADR-031](0031-opentelemetry-tracing.md) | OpenTelemetry distributed tracing | Accepted |
+| [ADR-032](0032-streaming-model-responses.md) | Streaming model responses | Accepted |

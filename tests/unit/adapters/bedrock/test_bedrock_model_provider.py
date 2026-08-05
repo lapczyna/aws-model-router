@@ -28,15 +28,28 @@ pytestmark = pytest.mark.unit
 class FakeBedrockRuntimeClient:
     """Returns/raises each item in `responses`, in order, one per `.converse()` call."""
 
-    def __init__(self, responses: Sequence[Any]) -> None:
+    def __init__(
+        self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()
+    ) -> None:
         self._responses = list(responses)
+        self._stream_responses = list(stream_responses)
         self.calls: list[dict[str, Any]] = []
+        self.stream_calls: list[dict[str, Any]] = []
 
     def converse(self, **kwargs: Any) -> Any:
         self.calls.append(kwargs)
         if not self._responses:
             raise AssertionError("FakeBedrockRuntimeClient: no more responses configured")
         item = self._responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def converse_stream(self, **kwargs: Any) -> Any:
+        self.stream_calls.append(kwargs)
+        if not self._stream_responses:
+            raise AssertionError("FakeBedrockRuntimeClient: no more stream responses configured")
+        item = self._stream_responses.pop(0)
         if isinstance(item, Exception):
             raise item
         return item
@@ -52,6 +65,28 @@ def _valid_response(text: str = "hello there") -> dict[str, Any]:
         "stopReason": "end_turn",
         "usage": {"inputTokens": 5, "outputTokens": 7},
     }
+
+
+def _stream_events(text: str = "hello there") -> list[dict[str, Any]]:
+    return [
+        {"contentBlockDelta": {"delta": {"text": text}}},
+        {"messageStop": {"stopReason": "end_turn"}},
+        {"metadata": {"usage": {"inputTokens": 5, "outputTokens": 7}}},
+    ]
+
+
+class _EventsThenRaise:
+    """A one-shot iterable that yields `events` then raises `exc` -- simulates a
+    ConverseStream event stream that fails partway through, after the caller has
+    already consumed some events."""
+
+    def __init__(self, events: Sequence[Any], exc: Exception) -> None:
+        self._events = list(events)
+        self._exc = exc
+
+    def __iter__(self) -> Any:
+        yield from self._events
+        raise self._exc
 
 
 def _request(**overrides: Any) -> ProviderRequest:
@@ -314,3 +349,103 @@ def test_router_alias_pointing_to_another_router_alias_is_rejected() -> None:
 
     assert exc_info.value.category is ProviderErrorCategory.PERMANENT
     assert client.calls == []
+
+
+def test_invoke_stream_yields_deltas_then_final_chunk() -> None:
+    client = FakeBedrockRuntimeClient(
+        stream_responses=[{"stream": _stream_events("hello there")}]
+    )
+    provider = _provider(client)
+
+    chunks = list(provider.invoke_stream(_request()))
+
+    assert "".join(c.delta_text for c in chunks) == "hello there"
+    assert chunks[-1].is_final is True
+    assert chunks[-1].usage is not None
+    assert chunks[-1].usage.input_tokens == 5
+    assert len(client.stream_calls) == 1
+
+
+def test_invoke_stream_is_lazy_until_iterated() -> None:
+    client = FakeBedrockRuntimeClient(stream_responses=[{"stream": _stream_events()}])
+    provider = _provider(client)
+
+    generator = provider.invoke_stream(_request())
+
+    assert client.stream_calls == []
+    list(generator)
+    assert len(client.stream_calls) == 1
+
+
+def test_invoke_stream_invalid_model_alias_raises_without_calling_client() -> None:
+    client = FakeBedrockRuntimeClient()
+    provider = _provider(client, models=[])
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.invoke_stream(_request(model_alias="does-not-exist"))
+
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+    assert client.stream_calls == []
+
+
+def test_invoke_stream_throttling_retries_stream_start_then_succeeds() -> None:
+    client = FakeBedrockRuntimeClient(
+        stream_responses=[
+            _client_error("ThrottlingException"),
+            {"stream": _stream_events()},
+        ]
+    )
+    sleep_calls: list[float] = []
+    provider = _provider(client, sleep_calls=sleep_calls)
+
+    chunks = list(provider.invoke_stream(_request()))
+
+    assert chunks[-1].is_final is True
+    assert len(client.stream_calls) == 2
+    assert len(sleep_calls) == 1
+
+
+def test_invoke_stream_exhausts_retries_before_first_chunk() -> None:
+    client = FakeBedrockRuntimeClient(
+        stream_responses=[_client_error("ThrottlingException")] * 3
+    )
+    provider = _provider(client, retry_policy=RetryPolicy(max_attempts=3))
+
+    with pytest.raises(ProviderError) as exc_info:
+        list(provider.invoke_stream(_request()))
+
+    assert exc_info.value.category is ProviderErrorCategory.THROTTLED
+    assert len(client.stream_calls) == 3
+
+
+def test_invoke_stream_mid_stream_failure_is_not_retried() -> None:
+    events = _EventsThenRaise(
+        [{"contentBlockDelta": {"delta": {"text": "partial "}}}],
+        _client_error("ThrottlingException"),
+    )
+    client = FakeBedrockRuntimeClient(stream_responses=[{"stream": events}])
+    provider = _provider(client)
+
+    generator = provider.invoke_stream(_request())
+    first = next(generator)
+
+    assert first.delta_text == "partial "
+    with pytest.raises(ProviderError) as exc_info:
+        next(generator)
+    assert exc_info.value.category is ProviderErrorCategory.THROTTLED
+    # A single stream-start call only -- the mid-stream failure was not retried.
+    assert len(client.stream_calls) == 1
+
+
+def test_invoke_stream_unsupported_parameter_raises_without_calling_client() -> None:
+    model = make_model(
+        "balanced-text-primary", capability_tags=("balanced-text",), supports_tool_use=False
+    )
+    client = FakeBedrockRuntimeClient(stream_responses=[{"stream": _stream_events()}])
+    provider = _provider(client, models=[model])
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.invoke_stream(_request(requires_tool_use=True))
+
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+    assert client.stream_calls == []

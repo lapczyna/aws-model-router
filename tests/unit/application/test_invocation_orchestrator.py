@@ -6,6 +6,7 @@ mocked away.
 
 import threading
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -22,7 +23,7 @@ from domain.fallback import FallbackPolicy
 from domain.invocation import InvocationAttemptStatus
 from domain.messages import Message
 from domain.policy import IdempotencyPolicy
-from domain.provider import ProviderResponse
+from domain.provider import ProviderResponse, ProviderResponseChunk
 from domain.reason_codes import RoutingReasonCode
 from domain.requests import InferenceRequest
 from domain.requirements import RoutingRequirements
@@ -72,6 +73,53 @@ class FakeModelProvider:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+class FakeStreamingModelProvider:
+    """A `ModelProvider` that also implements `StreamingModelProvider`. Each queued item
+    per model_alias is either an `Exception` (raised immediately, simulating a stream
+    that fails before its first chunk) or a sequence of `ProviderResponseChunk |
+    Exception` (yielded in order via `_stream_of`, an `Exception` partway through
+    simulating a stream that fails after already yielding real content) -- mirrors
+    `test_bedrock_model_provider._EventsThenRaise`/`test_openai_model_provider.
+    _ChunksThenRaise` one layer up."""
+
+    def __init__(self, responses: dict[str, list[Any]]) -> None:
+        self._responses = {alias: list(items) for alias, items in responses.items()}
+        self.calls: list[str] = []
+
+    def invoke(self, request: Any) -> ProviderResponse:
+        raise AssertionError("FakeStreamingModelProvider.invoke should never be called by invoke_stream()")
+
+    def invoke_stream(self, request: Any) -> Iterator[ProviderResponseChunk]:
+        self.calls.append(request.model_alias)
+        queue = self._responses.get(request.model_alias)
+        if not queue:
+            raise AssertionError(
+                f"FakeStreamingModelProvider: no more responses for {request.model_alias!r}"
+            )
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return _stream_of(*item)
+
+
+def _stream_of(*items: Any) -> Iterator[ProviderResponseChunk]:
+    for item in items:
+        if isinstance(item, Exception):
+            raise item
+        yield item
+
+
+def _stream_chunks(text: str, input_tokens: int = 5, output_tokens: int = 7) -> list[Any]:
+    return [
+        ProviderResponseChunk(delta_text=text),
+        ProviderResponseChunk(
+            is_final=True,
+            stop_reason=StopReason.END_TURN,
+            usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        ),
+    ]
 
 
 def _response(model_alias: str, content: str = "ok") -> ProviderResponse:
@@ -829,3 +877,207 @@ def test_no_decision_event_publisher_configured_does_not_error() -> None:
     result = orchestrator.invoke(_request())
 
     assert result.response is not None
+
+
+def test_stream_primary_succeeds() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    provider = FakeStreamingModelProvider({"model-a": [_stream_chunks("hello there")]})
+    decision_repository = InMemoryRoutingDecisionRepository()
+    metrics_publisher = _RecordingMetricsPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        decision_repository=decision_repository,
+        metrics_publisher=metrics_publisher,
+    )
+
+    chunks = list(orchestrator.invoke_stream(_request()))
+
+    assert "".join(c.delta_text for c in chunks) == "hello there"
+    assert provider.calls == ["model-a"]
+    assert len(metrics_publisher.published) == 1
+    result = metrics_publisher.published[0]
+    assert result.decision.selected_model_alias == "model-a"
+    assert result.decision.fallback_used is False
+    assert result.response is None  # never materialized as one object for a stream
+    assert [a.model_alias for a in result.invocation_attempts] == ["model-a"]
+    assert result.invocation_attempts[0].status == InvocationAttemptStatus.SUCCEEDED
+    assert decision_repository.get(result.decision.decision_id) is not None
+
+
+def test_stream_primary_fails_before_first_chunk_and_fallback_succeeds() -> None:
+    primary = make_model("primary", capability_tags=("balanced-text",))
+    fallback = make_model("fallback", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_model_aliases=("primary", "fallback"),
+        preferred_model_alias="primary",
+        fallback_policy=FallbackPolicy(fallback_model_aliases=("fallback",), maximum_attempts=2),
+    )
+    provider = FakeStreamingModelProvider(
+        {
+            "primary": [ProviderError("throttled", category=ProviderErrorCategory.THROTTLED)],
+            "fallback": [_stream_chunks("fallback answer")],
+        }
+    )
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([primary, fallback]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+    )
+
+    chunks = list(orchestrator.invoke_stream(_request()))
+
+    assert "".join(c.delta_text for c in chunks) == "fallback answer"
+    assert provider.calls == ["primary", "fallback"]
+
+
+def test_stream_primary_permanent_failure_before_first_chunk_does_not_fallback() -> None:
+    primary = make_model("primary", capability_tags=("balanced-text",))
+    fallback = make_model("fallback", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_model_aliases=("primary", "fallback"),
+        preferred_model_alias="primary",
+        fallback_policy=FallbackPolicy(fallback_model_aliases=("fallback",), maximum_attempts=2),
+    )
+    provider = FakeStreamingModelProvider(
+        {"primary": [ProviderError("bad request", category=ProviderErrorCategory.PERMANENT)]}
+        # "fallback" deliberately has no queued responses: if reached, the fake raises.
+    )
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([primary, fallback]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+    )
+
+    chunks = list(orchestrator.invoke_stream(_request()))
+
+    assert chunks == []
+    assert provider.calls == ["primary"]
+
+
+def test_stream_mid_stream_failure_is_not_retried_and_propagates() -> None:
+    primary = make_model("primary", capability_tags=("balanced-text",))
+    fallback = make_model("fallback", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_model_aliases=("primary", "fallback"),
+        preferred_model_alias="primary",
+        fallback_policy=FallbackPolicy(fallback_model_aliases=("fallback",), maximum_attempts=2),
+    )
+    provider = FakeStreamingModelProvider(
+        {
+            "primary": [
+                [
+                    ProviderResponseChunk(delta_text="partial "),
+                    ProviderError("throttled", category=ProviderErrorCategory.THROTTLED),
+                ]
+            ]
+            # "fallback" deliberately has no queued responses: an already-started
+            # stream must never fall back, even on a retryable-category failure.
+        }
+    )
+    metrics_publisher = _RecordingMetricsPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([primary, fallback]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        metrics_publisher=metrics_publisher,
+    )
+
+    generator = orchestrator.invoke_stream(_request())
+    first = next(generator)
+
+    assert first.delta_text == "partial "
+    with pytest.raises(ProviderError) as exc_info:
+        next(generator)
+    assert exc_info.value.category is ProviderErrorCategory.THROTTLED
+    assert provider.calls == ["primary"]
+
+    # The failed attempt was still persisted -- a caller that observes the raised
+    # error also gets a real audit trail for what was attempted.
+    assert len(metrics_publisher.published) == 1
+    result = metrics_publisher.published[0]
+    assert result.decision.selected_model_alias is None
+    assert [a.model_alias for a in result.invocation_attempts] == ["primary"]
+    assert result.invocation_attempts[0].status == InvocationAttemptStatus.THROTTLED
+
+
+def test_stream_no_eligible_model_yields_no_chunks_but_still_persists() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(
+        allowed_capabilities=("economical-text",), allowed_model_aliases=("model-a",)
+    )
+    provider = FakeStreamingModelProvider({})
+    metrics_publisher = _RecordingMetricsPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        metrics_publisher=metrics_publisher,
+    )
+
+    chunks = list(orchestrator.invoke_stream(_request()))  # requests "balanced-text"; denied
+
+    assert chunks == []
+    assert provider.calls == []
+    assert len(metrics_publisher.published) == 1
+    assert metrics_publisher.published[0].decision.selected_model_alias is None
+
+
+def test_stream_rejects_idempotency_key_immediately() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    provider = FakeStreamingModelProvider({"model-a": [_stream_chunks("hi")]})
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        orchestrator.invoke_stream(_request(idempotency_key="key-1"))
+
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+    assert provider.calls == []
+
+
+def test_stream_rejects_non_streaming_provider_immediately() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    # `FakeModelProvider` only implements `invoke`, not `invoke_stream`.
+    provider = FakeModelProvider({"model-a": [_response("model-a")]})
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        orchestrator.invoke_stream(_request())
+
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+    assert provider.calls == []
+
+
+def test_stream_abandoned_iterator_does_not_persist() -> None:
+    model = make_model("model-a", capability_tags=("balanced-text",))
+    policy = make_policy(allowed_model_aliases=("model-a",), preferred_model_alias="model-a")
+    provider = FakeStreamingModelProvider({"model-a": [_stream_chunks("hello there")]})
+    metrics_publisher = _RecordingMetricsPublisher()
+    decision_event_publisher = _RecordingDecisionEventPublisher()
+    orchestrator = _build_orchestrator(
+        InMemoryModelCatalogue([model]),
+        InMemoryRoutingPolicyRepository(default_policy=policy),
+        provider,
+        metrics_publisher=metrics_publisher,
+        decision_event_publisher=decision_event_publisher,
+    )
+
+    generator = orchestrator.invoke_stream(_request())
+    first = next(generator)
+    generator.close()  # type: ignore[attr-defined]  # caller stops consuming early
+
+    assert first.delta_text == "hello there"
+    assert metrics_publisher.published == []
+    assert decision_event_publisher.published == []

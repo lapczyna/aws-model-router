@@ -4,6 +4,7 @@ import pytest
 
 from adapters.bedrock.converse_mapper import (
     build_converse_request,
+    iter_converse_stream_events,
     map_stop_reason,
     parse_converse_response,
 )
@@ -144,3 +145,82 @@ def test_parse_converse_response_error_message_does_not_leak_response_content() 
         parse_converse_response(raw, "model-a", ProviderName.BEDROCK)
 
     assert "top secret prompt content" not in str(exc_info.value)
+
+
+def _content_delta(text: str) -> dict[str, Any]:
+    return {"contentBlockDelta": {"delta": {"text": text}}}
+
+
+def _message_stop(stop_reason: str = "end_turn") -> dict[str, Any]:
+    return {"messageStop": {"stopReason": stop_reason}}
+
+
+def _metadata(input_tokens: int = 12, output_tokens: int = 34) -> dict[str, Any]:
+    return {"metadata": {"usage": {"inputTokens": input_tokens, "outputTokens": output_tokens}}}
+
+
+def test_iter_converse_stream_events_yields_deltas_then_final_chunk() -> None:
+    events = [_content_delta("hello "), _content_delta("there"), _message_stop(), _metadata()]
+
+    chunks = list(iter_converse_stream_events(events))
+
+    assert [c.delta_text for c in chunks[:2]] == ["hello ", "there"]
+    assert all(not c.is_final for c in chunks[:2])
+    assert chunks[-1].is_final is True
+    assert chunks[-1].delta_text == ""
+    assert chunks[-1].stop_reason is StopReason.END_TURN
+    assert chunks[-1].usage is not None
+    assert chunks[-1].usage.input_tokens == 12
+    assert chunks[-1].usage.output_tokens == 34
+
+
+def test_iter_converse_stream_events_reconstructs_full_text() -> None:
+    events = [_content_delta("hello "), _content_delta("there"), _message_stop(), _metadata()]
+
+    chunks = list(iter_converse_stream_events(events))
+
+    assert "".join(c.delta_text for c in chunks) == "hello there"
+
+
+def test_iter_converse_stream_events_ignores_empty_text_deltas() -> None:
+    events = [{"contentBlockDelta": {"delta": {}}}, _message_stop(), _metadata()]
+
+    chunks = list(iter_converse_stream_events(events))
+
+    assert len(chunks) == 1
+    assert chunks[0].is_final is True
+
+
+def test_iter_converse_stream_events_missing_message_stop_is_malformed() -> None:
+    events = [_content_delta("hello"), _metadata()]
+
+    with pytest.raises(ProviderError) as exc_info:
+        list(iter_converse_stream_events(events))
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+
+
+def test_iter_converse_stream_events_missing_metadata_is_malformed() -> None:
+    events = [_content_delta("hello"), _message_stop()]
+
+    with pytest.raises(ProviderError) as exc_info:
+        list(iter_converse_stream_events(events))
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+
+
+def test_iter_converse_stream_events_error_never_leaks_response_content() -> None:
+    events = [_content_delta("TOP-SECRET-MODEL-OUTPUT"), _message_stop()]
+
+    with pytest.raises(ProviderError) as exc_info:
+        list(iter_converse_stream_events(events))
+    assert "TOP-SECRET-MODEL-OUTPUT" not in str(exc_info.value)
+
+
+def test_iter_converse_stream_events_already_yielded_chunks_precede_the_error() -> None:
+    events = [_content_delta("partial"), _message_stop()]
+
+    generator = iter_converse_stream_events(events)
+    first = next(generator)
+
+    assert first.delta_text == "partial"
+    with pytest.raises(ProviderError):
+        next(generator)

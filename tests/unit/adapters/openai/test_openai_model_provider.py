@@ -11,8 +11,10 @@ from typing import Any
 import httpx
 import openai
 import pytest
-from openai.types.chat import ChatCompletion, ChatCompletionMessage
+from openai.types.chat import ChatCompletion, ChatCompletionChunk, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
+from openai.types.chat.chat_completion_chunk import Choice as ChunkChoice
+from openai.types.chat.chat_completion_chunk import ChoiceDelta
 from openai.types.completion_usage import CompletionUsage
 
 from adapters.common.retry import RetryPolicy
@@ -29,13 +31,28 @@ _FAKE_REQUEST = httpx.Request("POST", "https://api.openai.com/v1/chat/completion
 
 
 class _FakeCompletions:
-    """Returns/raises each item in `responses`, in order, one per `.create()` call."""
+    """Returns/raises each item in `responses`, in order, one per `.create()` call.
+    A `stream=True` call is dispatched against its own separate `stream_responses`
+    queue, mirroring how `FakeBedrockRuntimeClient` separates `.converse()` from
+    `.converse_stream()`."""
 
-    def __init__(self, responses: Sequence[Any]) -> None:
+    def __init__(
+        self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()
+    ) -> None:
         self._responses = list(responses)
+        self._stream_responses = list(stream_responses)
         self.calls: list[dict[str, Any]] = []
+        self.stream_calls: list[dict[str, Any]] = []
 
     def create(self, **kwargs: Any) -> Any:
+        if kwargs.get("stream"):
+            self.stream_calls.append(kwargs)
+            if not self._stream_responses:
+                raise AssertionError("_FakeCompletions: no more stream responses configured")
+            item = self._stream_responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
         self.calls.append(kwargs)
         if not self._responses:
             raise AssertionError("_FakeCompletions: no more responses configured")
@@ -48,13 +65,19 @@ class _FakeCompletions:
 class FakeOpenAIClient:
     """Mimics `openai.OpenAI`'s `.chat.completions.create(...)` attribute path."""
 
-    def __init__(self, responses: Sequence[Any]) -> None:
-        self._completions = _FakeCompletions(responses)
+    def __init__(
+        self, responses: Sequence[Any] = (), stream_responses: Sequence[Any] = ()
+    ) -> None:
+        self._completions = _FakeCompletions(responses, stream_responses)
         self.chat = type("_Chat", (), {"completions": self._completions})()
 
     @property
     def calls(self) -> list[dict[str, Any]]:
         return self._completions.calls
+
+    @property
+    def stream_calls(self) -> list[dict[str, Any]]:
+        return self._completions.stream_calls
 
 
 def _status_error(cls: type[openai.APIStatusError], status_code: int) -> openai.APIStatusError:
@@ -77,6 +100,42 @@ def _valid_response(text: str = "hello there") -> ChatCompletion:
         ],
         usage=CompletionUsage(prompt_tokens=5, completion_tokens=7, total_tokens=12),
     )
+
+
+def _stream_chunks(text: str = "hello there") -> list[ChatCompletionChunk]:
+    return [
+        ChatCompletionChunk(
+            id="chatcmpl-fake",
+            object="chat.completion.chunk",
+            created=0,
+            model="gpt-4o-mini",
+            choices=[
+                ChunkChoice(index=0, delta=ChoiceDelta(content=text), finish_reason="stop")
+            ],
+        ),
+        ChatCompletionChunk(
+            id="chatcmpl-fake",
+            object="chat.completion.chunk",
+            created=0,
+            model="gpt-4o-mini",
+            choices=[],
+            usage=CompletionUsage(prompt_tokens=5, completion_tokens=7, total_tokens=12),
+        ),
+    ]
+
+
+class _ChunksThenRaise:
+    """A one-shot iterable that yields `chunks` then raises `exc` -- simulates a Chat
+    Completions stream that fails partway through, mirroring
+    `test_bedrock_model_provider._EventsThenRaise`."""
+
+    def __init__(self, chunks: Sequence[Any], exc: Exception) -> None:
+        self._chunks = list(chunks)
+        self._exc = exc
+
+    def __iter__(self) -> Any:
+        yield from self._chunks
+        raise self._exc
 
 
 def _request(**overrides: Any) -> ProviderRequest:
@@ -334,3 +393,98 @@ def test_system_prompt_becomes_leading_system_message() -> None:
     messages = client.calls[0]["messages"]
     assert messages[0] == {"role": "system", "content": "be concise"}
     assert messages[1] == {"role": "user", "content": "hi"}
+
+
+def test_invoke_stream_yields_deltas_then_final_chunk() -> None:
+    client = FakeOpenAIClient(stream_responses=[_stream_chunks("hello there")])
+    provider = _provider(client)
+
+    chunks = list(provider.invoke_stream(_request()))
+
+    assert "".join(c.delta_text for c in chunks) == "hello there"
+    assert chunks[-1].is_final is True
+    assert chunks[-1].usage is not None
+    assert chunks[-1].usage.input_tokens == 5
+    assert len(client.stream_calls) == 1
+    assert client.stream_calls[0]["stream"] is True
+    assert client.stream_calls[0]["stream_options"] == {"include_usage": True}
+
+
+def test_invoke_stream_is_lazy_until_iterated() -> None:
+    client = FakeOpenAIClient(stream_responses=[_stream_chunks()])
+    provider = _provider(client)
+
+    generator = provider.invoke_stream(_request())
+
+    assert client.stream_calls == []
+    list(generator)
+    assert len(client.stream_calls) == 1
+
+
+def test_invoke_stream_invalid_model_alias_raises_without_calling_client() -> None:
+    client = FakeOpenAIClient()
+    provider = _provider(client, models=[])
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.invoke_stream(_request(model_alias="does-not-exist"))
+
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+    assert client.stream_calls == []
+
+
+def test_invoke_stream_rate_limit_retries_stream_start_then_succeeds() -> None:
+    client = FakeOpenAIClient(
+        stream_responses=[_status_error(openai.RateLimitError, 429), _stream_chunks()]
+    )
+    sleep_calls: list[float] = []
+    provider = _provider(client, sleep_calls=sleep_calls)
+
+    chunks = list(provider.invoke_stream(_request()))
+
+    assert chunks[-1].is_final is True
+    assert len(client.stream_calls) == 2
+    assert len(sleep_calls) == 1
+
+
+def test_invoke_stream_exhausts_retries_before_first_chunk() -> None:
+    client = FakeOpenAIClient(stream_responses=[_status_error(openai.RateLimitError, 429)] * 3)
+    provider = _provider(client, retry_policy=RetryPolicy(max_attempts=3))
+
+    with pytest.raises(ProviderError) as exc_info:
+        list(provider.invoke_stream(_request()))
+
+    assert exc_info.value.category is ProviderErrorCategory.THROTTLED
+    assert len(client.stream_calls) == 3
+
+
+def test_invoke_stream_mid_stream_failure_is_not_retried() -> None:
+    first_chunk = _stream_chunks("partial ")[0]
+    chunks = _ChunksThenRaise([first_chunk], _status_error(openai.RateLimitError, 429))
+    client = FakeOpenAIClient(stream_responses=[chunks])
+    provider = _provider(client)
+
+    generator = provider.invoke_stream(_request())
+    first = next(generator)
+
+    assert first.delta_text == "partial "
+    with pytest.raises(ProviderError) as exc_info:
+        next(generator)
+    assert exc_info.value.category is ProviderErrorCategory.THROTTLED
+    assert len(client.stream_calls) == 1
+
+
+def test_invoke_stream_unsupported_tool_use_raises_without_calling_client() -> None:
+    model = make_model(
+        "openai-balanced-text",
+        provider=ProviderName.OPENAI,
+        capability_tags=("balanced-text",),
+        supports_tool_use=False,
+    )
+    client = FakeOpenAIClient(stream_responses=[_stream_chunks()])
+    provider = _provider(client, models=[model])
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.invoke_stream(_request(requires_tool_use=True))
+
+    assert exc_info.value.category is ProviderErrorCategory.PERMANENT
+    assert client.stream_calls == []

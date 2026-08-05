@@ -430,6 +430,54 @@ configures a real OTLP endpoint, mirroring T23's reasoning for OpenAI).
 - [x] Threat model updated (T25–T27); observability guide updated with both new sections
 - [x] Committed and pushed
 
+#### Phase 10c — Streaming model responses (domain/adapter/orchestrator layers) — Complete
+Requested explicitly (asked how far Phase 10c's streaming support should go; user chose
+"full stack, no public endpoint yet" over also building a Lambda Function URL streaming
+endpoint, or stopping at the domain layer alone). See
+[ADR-032](docs/adr/0032-streaming-model-responses.md) for the full design and why the
+public-endpoint question was deliberately scoped out of this phase: this project's API
+Gateway REST API (ADR-016) buffers Lambda responses and cannot pass a streamed response
+through — true end-to-end HTTP streaming needs a separate Lambda Function URL
+(`InvokeWithResponseStream`) ingress path with its own IAM auth story, a large enough unit
+of work to scope on its own rather than bundle in here.
+
+`domain.ports.StreamingModelProvider` (a separate, `@runtime_checkable` optional-capability
+protocol, not a method added to `ModelProvider`) plus `domain.provider.ProviderResponseChunk`
+were already in progress from a prior session when this phase picked up. Completed this
+phase: `BedrockModelProvider.invoke_stream` (Bedrock `ConverseStream`) and
+`OpenAIModelProvider.invoke_stream` (Chat Completions `stream=True` +
+`stream_options={"include_usage": True}`), mirroring each other's shape exactly, same as
+their non-streaming `invoke()`; `CompositeModelProvider.invoke_stream` dispatching with an
+`isinstance` capability check; `InvocationOrchestrator.invoke_stream`, which falls back
+across the candidate chain only while establishing a stream — once a chunk has reached the
+caller, the model choice is final, and a mid-stream failure propagates instead of silently
+retrying a different model.
+
+Along the way: verified against the real `EmfMetricsPublisher`/
+`EventBridgeDecisionEventPublisher` implementations that neither reads
+`InferenceResult.response`, so leaving it `None` for a streamed request (even on success —
+the full response is never materialized as one object, only its constituent chunks) costs
+nothing; confirmed no new trust boundary applies (streaming reuses the exact same
+Bedrock/OpenAI clients, credentials, and network paths `invoke()` already uses — Boundary
+6's existing OpenAI threats already cover it), so no threat-model update was needed this
+phase, unlike 10a/10b.
+
+**DoD:**
+- [x] `StreamingModelProvider`/`ProviderResponseChunk` in `domain/` (from prior session,
+      verified and extended this phase)
+- [x] `BedrockModelProvider.invoke_stream` and `OpenAIModelProvider.invoke_stream`, each
+      with its own pure mapper generator (`iter_converse_stream_events`,
+      `iter_chat_completion_stream_chunks`); eager validation, lazy network call, retries
+      only around establishing the stream
+- [x] `CompositeModelProvider.invoke_stream` dispatch with a capability check
+- [x] `InvocationOrchestrator.invoke_stream`: fallback-before-first-chunk, no fallback
+      after; exactly-once persistence (`AuditRecord`/metrics/decision event) on completion
+      or terminal failure, none on an abandoned iterator
+- [x] Unit tests for every layer (adapters, mappers, composite dispatch, orchestrator
+      fallback/persistence semantics); full suite, ruff, and mypy all clean
+- [x] ADR-032 documents the design and the deliberately-deferred public-endpoint question
+- [ ] Committed and pushed
+
 ## Completed milestones
 
 | Phase | Status | Commit / tag |
@@ -445,12 +493,13 @@ configures a real OTLP endpoint, mirroring T23's reasoning for OpenAI).
 | Phase 9 — Performance, load testing, and portfolio polish | Complete | `6063cb4` |
 | Phase 10a — Multi-provider routing (OpenAI) | Complete | `f0e9a00` |
 | Phase 10b — EventBridge decision events + OpenTelemetry tracing | Complete | `59d6710` |
+| Phase 10c — Streaming model responses (domain/adapter/orchestrator layers) | Complete | *(pending commit)* |
 
 ## Remaining milestones
 
 | Phase | Title |
 |---|---|
-| 10c+ | Any other Phase 10 item (optional — explicit request only per item; none scoped yet) |
+| 10d+ | Any other Phase 10 item, including a public streaming HTTP endpoint (Lambda Function URL / `InvokeWithResponseStream`) — optional, explicit request only per item; none scoped yet |
 
 ## Open assumptions / decisions carried forward
 

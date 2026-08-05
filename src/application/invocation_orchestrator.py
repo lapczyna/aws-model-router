@@ -9,7 +9,7 @@ normalized response, if any model succeeded.
 """
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterator
 
 from opentelemetry.trace import Tracer
 
@@ -37,8 +37,9 @@ from domain.ports import (
     ModelProvider,
     RoutingDecisionRepository,
     RoutingPolicyRepository,
+    StreamingModelProvider,
 )
-from domain.provider import ProviderRequest
+from domain.provider import ProviderRequest, ProviderResponseChunk
 from domain.reason_codes import RoutingReasonCode, sort_reason_codes
 from domain.requests import InferenceRequest
 from domain.requirements import resolve_effective_requirements
@@ -104,6 +105,156 @@ class InvocationOrchestrator:
             span.set_attribute("model_router.fallback_used", result.decision.fallback_used)
             span.set_attribute("model_router.response_succeeded", result.response is not None)
             return result
+
+    def invoke_stream(self, request: InferenceRequest) -> Iterator[ProviderResponseChunk]:
+        """Evaluate a route and stream the selected model's response, falling back to
+        the next eligible candidate exactly like `invoke()` -- but only while no chunk
+        has yet reached the caller. `domain.ports.StreamingModelProvider.invoke_stream`
+        raises before yielding anything if establishing the stream itself fails (e.g. a
+        throttled connection attempt), and that failure is retried against the next
+        candidate the same way a synchronous `invoke()` failure is. The moment a single
+        `ProviderResponseChunk` has been yielded from here, though, the model choice is
+        final: a `ProviderError` raised while consuming the rest of that stream
+        propagates straight to the caller instead of silently trying a different model,
+        since content already sent to the caller can never be un-sent (ADR-032).
+
+        Unlike `invoke()`, this does not accept an idempotency key -- caching/replaying a
+        streamed response is not supported (Phase 10c) -- and requires the configured
+        `model_provider` to additionally implement `StreamingModelProvider`. Both are
+        checked eagerly, so a request with `idempotency_key` set or a non-streaming
+        provider raises `domain.errors.ProviderError` immediately, before route
+        evaluation, rather than after the caller starts iterating. Route evaluation
+        itself, and every invocation attempt, run lazily -- nothing happens until the
+        first item is pulled from the returned iterator, unlike `invoke()`'s synchronous
+        return.
+
+        A request for which no model is eligible, or a model that fails to produce a
+        single stream, yields no chunks at all (the returned iterator raises
+        `StopIteration` immediately) -- not an error, mirroring `invoke()`'s
+        `response=None` case. `InferenceResult.response` is always `None` for a streamed
+        request, even on success: the full response is never materialized as one object
+        here, only as the chunks the caller already consumed directly. `AuditRecord`,
+        `MetricsPublisher`, and `DecisionEventPublisher` never read `response` (only
+        `decision`/`invocation_attempts`), so persistence is unaffected. That persistence
+        happens once the returned iterator is fully drained or terminally fails -- a
+        caller that abandons the iterator early (never reaches the final chunk or an
+        exception) triggers no audit record, no metrics, and no decision event for that
+        request, the streaming equivalent of a client disconnecting before an HTTP
+        response finishes.
+        """
+        if request.idempotency_key is not None:
+            raise ProviderError(
+                "invoke_stream does not support idempotency keys (Phase 10c).",
+                category=ProviderErrorCategory.PERMANENT,
+            )
+        if not isinstance(self._model_provider, StreamingModelProvider):
+            raise ProviderError(
+                "The configured model provider does not implement StreamingModelProvider.",
+                category=ProviderErrorCategory.PERMANENT,
+            )
+        return self._stream(request)
+
+    def _stream(self, request: InferenceRequest) -> Iterator[ProviderResponseChunk]:
+        with self._tracer.start_as_current_span("model_router.invoke_stream") as span:
+            span.set_attribute("model_router.application_id", request.application_id)
+            result = yield from self._invoke_stream_uncached(request)
+            span.set_attribute("model_router.decision_id", result.decision.decision_id)
+            span.set_attribute(
+                "model_router.selected_model_alias", result.decision.selected_model_alias or ""
+            )
+            span.set_attribute("model_router.fallback_used", result.decision.fallback_used)
+
+    def _invoke_stream_uncached(
+        self, request: InferenceRequest
+    ) -> Generator[ProviderResponseChunk, None, InferenceResult]:
+        decision = self._route_evaluation_service.evaluate(request)
+        policy = self._policy_repository.resolve(request.application_id)
+        chain = self._build_candidate_chain(decision, policy.fallback_policy)
+        if not chain:
+            return self._finalize_stream(decision, None, [], [])
+
+        effective = resolve_effective_requirements(request.requirements, policy)
+        assert isinstance(self._model_provider, StreamingModelProvider)  # checked by invoke_stream
+
+        attempts: list[InvocationAttempt] = []
+        extra_reason_codes: list[RoutingReasonCode] = []
+
+        for candidate_alias in chain:
+            provider_request = ProviderRequest(
+                model_alias=candidate_alias,
+                messages=request.messages,
+                max_output_tokens=effective.maximum_output_tokens,
+                requires_tool_use=effective.requires_tool_use,
+                requires_structured_output=effective.requires_structured_output,
+            )
+            started_at = self._monotonic()
+            try:
+                chunk_iterator = self._model_provider.invoke_stream(provider_request)
+                first_chunk = next(chunk_iterator)
+            except ProviderError as exc:
+                latency_ms = int((self._monotonic() - started_at) * 1000)
+                status = status_for_provider_error_category(exc.category)
+                attempts.append(
+                    InvocationAttempt(
+                        model_alias=candidate_alias, status=status, latency_ms=latency_ms
+                    )
+                )
+                self._record_health_outcome(candidate_alias, status)
+                extra_code = reason_code_for_provider_error_category(exc.category)
+                if extra_code is not None:
+                    extra_reason_codes.append(extra_code)
+                if exc.category is ProviderErrorCategory.PERMANENT:
+                    break
+                continue
+
+            # The stream has started -- this candidate is now committed. Any failure
+            # from here on propagates to the caller instead of trying the next
+            # candidate (see invoke_stream()'s docstring).
+            if candidate_alias != decision.selected_model_alias:
+                extra_reason_codes.append(RoutingReasonCode.FALLBACK_SELECTED)
+            try:
+                yield first_chunk
+                yield from chunk_iterator
+            except ProviderError as exc:
+                latency_ms = int((self._monotonic() - started_at) * 1000)
+                status = status_for_provider_error_category(exc.category)
+                attempts.append(
+                    InvocationAttempt(
+                        model_alias=candidate_alias, status=status, latency_ms=latency_ms
+                    )
+                )
+                self._record_health_outcome(candidate_alias, status)
+                self._finalize_stream(decision, None, extra_reason_codes, attempts)
+                raise
+
+            latency_ms = int((self._monotonic() - started_at) * 1000)
+            attempts.append(
+                InvocationAttempt(
+                    model_alias=candidate_alias,
+                    status=InvocationAttemptStatus.SUCCEEDED,
+                    latency_ms=latency_ms,
+                )
+            )
+            self._record_health_outcome(candidate_alias, InvocationAttemptStatus.SUCCEEDED)
+            return self._finalize_stream(decision, candidate_alias, extra_reason_codes, attempts)
+
+        return self._finalize_stream(decision, None, extra_reason_codes, attempts)
+
+    def _finalize_stream(
+        self,
+        decision: RoutingDecision,
+        succeeded_alias: str | None,
+        extra_reason_codes: list[RoutingReasonCode],
+        attempts: list[InvocationAttempt],
+    ) -> InferenceResult:
+        final_decision = self._aggregate_decision(decision, succeeded_alias, extra_reason_codes)
+        result = InferenceResult(
+            decision=final_decision, response=None, invocation_attempts=tuple(attempts)
+        )
+        self._persist(result)
+        self._publish_metrics(result)
+        self._publish_decision_event(result)
+        return result
 
     def _invoke_with_idempotency(
         self, request: InferenceRequest, idempotency_key: str, store: IdempotencyStore

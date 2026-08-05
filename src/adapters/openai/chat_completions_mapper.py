@@ -7,14 +7,15 @@ ADR-029). Kept as pure functions, independent of the `openai` client, so mapping
 is unit-testable without a network call.
 """
 
+from collections.abc import Iterable, Iterator
 from typing import Any
 
-from openai.types.chat import ChatCompletion
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from domain.enums import ProviderErrorCategory, ProviderName, Role, StopReason
 from domain.errors import ProviderError
 from domain.messages import Message
-from domain.provider import ProviderRequest, ProviderResponse
+from domain.provider import ProviderRequest, ProviderResponse, ProviderResponseChunk
 from domain.usage import Usage
 
 _FINISH_REASON_MAP: dict[str, StopReason] = {
@@ -63,6 +64,21 @@ def build_chat_completion_request(request: ProviderRequest, target_model: str) -
     return payload
 
 
+def build_chat_completion_stream_request(
+    request: ProviderRequest, target_model: str
+) -> dict[str, Any]:
+    """Build the keyword arguments for `client.chat.completions.create(stream=True,
+    **kwargs)` (ADR-032, Phase 10c) -- the same payload as `build_chat_completion_request`
+    plus `stream=True` and `stream_options={"include_usage": True}`, the latter being
+    what makes the Chat Completions API emit a final usage-only chunk; without it, a
+    streamed response never reports token usage at all.
+    """
+    payload = build_chat_completion_request(request, target_model)
+    payload["stream"] = True
+    payload["stream_options"] = {"include_usage": True}
+    return payload
+
+
 def parse_chat_completion_response(
     response: ChatCompletion, model_alias: str, provider: ProviderName
 ) -> ProviderResponse:
@@ -91,6 +107,50 @@ def parse_chat_completion_response(
         model_alias=model_alias,
         provider=provider,
         message=Message(role=Role.ASSISTANT, content=content),
+        stop_reason=map_finish_reason(finish_reason_raw),
+        usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+    )
+
+
+def iter_chat_completion_stream_chunks(
+    chunks: Iterable[ChatCompletionChunk],
+) -> Iterator[ProviderResponseChunk]:
+    """Convert a raw Chat Completions stream (an iterable of `ChatCompletionChunk`) into
+    `ProviderResponseChunk`s (ADR-032, Phase 10c).
+
+    Mirrors `adapters.bedrock.converse_mapper.iter_converse_stream_events`: incremental
+    `delta.content` text is yielded as it arrives, and the finish reason/usage totals --
+    carried by different chunks (`stream_options={"include_usage": True}` puts usage on
+    its own final, choice-less chunk) -- are folded into one final chunk
+    (`is_final=True`) once the stream is exhausted.
+
+    Raises `ProviderError` (category `PERMANENT`) if the stream ends without ever
+    supplying a finish reason or usage. Errors raised by the `openai` SDK while iterating
+    `chunks` are deliberately left unhandled here for `OpenAIModelProvider` to classify
+    with the same `classify_provider_exception` it already uses for `.create()`.
+    """
+    finish_reason_raw: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+    for chunk in chunks:
+        if chunk.choices:
+            choice = chunk.choices[0]
+            if choice.delta.content:
+                yield ProviderResponseChunk(delta_text=choice.delta.content)
+            if choice.finish_reason is not None:
+                finish_reason_raw = choice.finish_reason
+        if chunk.usage is not None:
+            input_tokens = chunk.usage.prompt_tokens
+            output_tokens = chunk.usage.completion_tokens
+
+    if finish_reason_raw is None or input_tokens is None or output_tokens is None:
+        raise ProviderError(
+            _MALFORMED_RESPONSE_MESSAGE, category=ProviderErrorCategory.PERMANENT
+        )
+
+    yield ProviderResponseChunk(
+        is_final=True,
         stop_reason=map_finish_reason(finish_reason_raw),
         usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
     )

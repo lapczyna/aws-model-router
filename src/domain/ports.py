@@ -10,9 +10,9 @@ their first real implementation and consumer, not speculatively ahead of them
 (ADR-020, ADR-019).
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from domain.catalogue import ModelDefinition, ModelPricing
 from domain.enums import ModelHealthStatus
@@ -20,7 +20,7 @@ from domain.idempotency import IdempotencyReservation
 from domain.invocation import AuditRecord, InferenceResult, InvocationAttemptStatus
 from domain.messages import Message
 from domain.policy import RoutingPolicy
-from domain.provider import ProviderRequest, ProviderResponse
+from domain.provider import ProviderRequest, ProviderResponse, ProviderResponseChunk
 from domain.usage import EstimatedCost, Usage
 
 
@@ -82,6 +82,26 @@ class ModelProvider(Protocol):
     """
 
     def invoke(self, request: ProviderRequest) -> ProviderResponse: ...
+
+
+@runtime_checkable
+class StreamingModelProvider(Protocol):
+    """An optional capability a `ModelProvider` implementation may additionally provide
+    (ADR-032, Phase 10c) — deliberately a separate protocol, not a method added to
+    `ModelProvider` itself, so a provider adapter that cannot stream is never forced to
+    implement a method it would have to fake or raise `NotImplementedError` from.
+    `@runtime_checkable` so `CompositeModelProvider.invoke_stream` can `isinstance`-check
+    a resolved provider before delegating to it, rather than trying and catching
+    `AttributeError`.
+
+    Raises `domain.errors.ProviderError` for every failure category, same as
+    `ModelProvider.invoke` — but a failure partway through an already-started stream
+    cannot be un-sent to whatever already consumed earlier chunks; see
+    `application.invocation_orchestrator.InvocationOrchestrator.invoke_stream`'s
+    docstring for how that's handled.
+    """
+
+    def invoke_stream(self, request: ProviderRequest) -> Iterator[ProviderResponseChunk]: ...
 
 
 class IdempotencyStore(Protocol):

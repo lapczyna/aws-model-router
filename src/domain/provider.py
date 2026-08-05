@@ -44,3 +44,23 @@ class ProviderResponse(BaseModel):
     message: Message
     stop_reason: StopReason
     usage: Usage
+
+
+class ProviderResponseChunk(BaseModel):
+    """One piece of a streamed response (`StreamingModelProvider.invoke_stream`,
+    ADR-032). Intermediate chunks carry only `delta_text` — the incremental text
+    produced since the previous chunk. The final chunk (`is_final=True`) carries no
+    further text and instead carries the same `stop_reason`/`usage` a non-streaming
+    `ProviderResponse` would, once the full response is known.
+
+    Concatenating every `delta_text` across all chunks in order (each chunk's text
+    comes immediately after the previous one's, with no gaps) reconstructs the same
+    full response text a non-streaming `invoke()` call would have returned in one shot.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
+
+    delta_text: str = ""
+    is_final: bool = False
+    stop_reason: StopReason | None = None
+    usage: Usage | None = None
