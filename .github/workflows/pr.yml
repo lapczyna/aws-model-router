@@ -130,6 +130,16 @@ jobs:
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    # gitleaks-action calls `GET /repos/{owner}/{repo}/pulls/{n}/commits` to determine
+    # the diff range for a pull_request-triggered scan -- read-only, but a scope the
+    # workflow-level `contents: read` permission (line 14) doesn't cover. Scoped to just
+    # this job rather than raised workflow-wide, since no other job needs it. Dependabot
+    # PRs get a read-only-by-default GITHUB_TOKEN, but respect explicit `permissions:`
+    # declared in the workflow (GitHub Actions changelog, 2021-10-06) -- this is not a
+    # write grant, so it doesn't weaken the fork/Dependabot isolation ADR-026 describes.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
