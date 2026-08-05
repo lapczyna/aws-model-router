@@ -95,9 +95,14 @@ jobs:
           # L2 construct auto-generates a custom-resource Lambda pinned to a Node.js
           # runtime newer than cfn-lint's bundled resource spec currently recognizes —
           # a cfn-lint schema-currency gap in a CDK-internal resource this project's
-          # code doesn't configure, not a real template defect.
-          cfn-lint --ignore-checks W3005 --template infrastructure/cdk.out/ModelRouter-dev.template.json
-          cfn-lint --ignore-checks W3005 --template infrastructure/cdk.out/ModelRouter-prod.template.json
+          # code doesn't configure, not a real template defect. W3037 ignored for
+          # ModelRouter only: cfn-lint's bundled IAM action list recognizes
+          # bedrock:InvokeModel/InvokeModelWithResponseStream but not the newer
+          # bedrock:Converse/ConverseStream (added Phase 3/Phase 10c) — both are real,
+          # documented Bedrock Runtime actions, verified against AWS's own IAM
+          # reference, not a typo in this project's policy; another schema-currency gap.
+          cfn-lint --ignore-checks W3005 W3037 --template infrastructure/cdk.out/ModelRouter-dev.template.json
+          cfn-lint --ignore-checks W3005 W3037 --template infrastructure/cdk.out/ModelRouter-prod.template.json
           cfn-lint --ignore-checks W3005 E3030 --template infrastructure/cdk.out/GitHubOidc.template.json
 
   dependency-scan:
