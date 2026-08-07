@@ -58,7 +58,7 @@ infra = [
     # every relevant method marked `:stability: experimental`) -- not a drop-in
     # version bump. Revisit once cdk-nag 3.x stabilizes out of experimental status
     # (see PR #11, closed rather than migrated to an unstable API).
-    "cdk-nag>=2.35,<3.0",
+    "cdk-nag>=2.35,<4.0",
 ]
 
 [build-system]
