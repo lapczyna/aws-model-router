@@ -54,7 +54,10 @@ every `main` push would undermine the point of continuous deployment to it.
   sufficient on its own until this repository setting was also turned on. Required
   approving reviews are **0**, not the more typical 1+: this is a solo-maintained repo,
   and GitHub never counts a PR author's own approval, so requiring 1 would have
-  permanently locked the owner out of merging anything.
+  permanently locked the owner out of merging anything. The doc updates recording this
+  were themselves the first change merged through the resulting flow —
+  [PR #15](https://github.com/lapczyna/aws-model-router/pull/15) (`ebfff0c`), branch →
+  PR → all six checks green → merge, not a direct push.
 * **`pr.yml` also gained a `push: branches: [main]` trigger alongside `pull_request`**,
   added shortly before branch protection itself, back when this project's practice was
   still direct pushes to `main` (`PROJECT_PLAN.md`) and no gate was enforcing the "PR

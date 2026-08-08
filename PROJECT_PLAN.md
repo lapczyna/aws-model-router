@@ -680,7 +680,10 @@ incorrect:
   approving reviews are set to **0**, not 1: this is a solo-maintained repo, and GitHub
   never counts a PR author's own approval, so requiring 1 would have permanently locked
   the owner out of merging anything. `docs/operations/ci-cd.md` documents the exact
-  settings applied.
+  settings applied. The doc updates recording this were themselves the first change
+  merged through the new flow —
+  [PR #15](https://github.com/lapczyna/aws-model-router/pull/15) (`ebfff0c`), branch →
+  PR → all six checks green → merge, not a direct push.
 * **cfn-lint caught a real bug cdk-nag did not** (ADR-027): `AWS::CloudWatch::Dashboard`
   (Phase 6's `ObservabilityConstruct`) was being tagged by the stack-wide
   `Tags.of(stack).add(...)` calls, but CloudFormation's resource schema for that
