@@ -1,5 +1,6 @@
 # aws-model-router
 
+[![CI](https://github.com/lapczyna/aws-model-router/actions/workflows/pr.yml/badge.svg)](https://github.com/lapczyna/aws-model-router/actions/workflows/pr.yml)
 [![License: MIT](https://img.shields.io/github/license/lapczyna/aws-model-router)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 [![AWS CDK](https://img.shields.io/badge/AWS%20CDK-v2-orange.svg)](infrastructure/)
@@ -322,11 +323,12 @@ and [`docs/operations/disaster-recovery.md`](docs/operations/disaster-recovery.m
   duplicated onto the GitHub-trusted role.
 * **PR and deployment are separate workflows, by construction**
   ([ADR-026](docs/adr/0026-pr-and-deploy-workflow-separation.md)): `pr.yml` (every pull
-  request, including forks) requests no `id-token` permission and touches no AWS
-  credential anywhere in the file — there's nothing for a fork PR to exploit, no
-  configuration to get right. `deploy.yml` triggers only on a push to `main`, deploying
-  `dev` automatically and `prod` only after a human approves the `prod` GitHub
-  Environment's required-reviewers protection rule.
+  request, including forks, and every push to `main`) requests no `id-token` permission
+  and touches no AWS credential anywhere in the file — there's nothing for a fork PR to
+  exploit, no configuration to get right, and the push trigger doesn't change that, since
+  a fork can never push to this repository's `main`. `deploy.yml` triggers only on a push
+  to `main`, deploying `dev` automatically and `prod` only after a human approves the
+  `prod` GitHub Environment's required-reviewers protection rule.
 * **IaC security scanning: cdk-nag + cfn-lint**
   ([ADR-027](docs/adr/0027-iac-security-scanning-approach.md)): `cdk-nag`'s
   `AwsSolutionsChecks` runs as a gated CDK Aspect (`CDK_NAG_ENABLED=true`); every

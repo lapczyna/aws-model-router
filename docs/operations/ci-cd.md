@@ -9,11 +9,12 @@ behind what follows.
 
 ## Overview
 
-* **`pr.yml`** — every pull request (including from forks): lint/format/typecheck,
-  unit+contract tests with coverage, CDK assertion tests, an IaC security scan
-  (cdk-nag + cfn-lint), a dependency vulnerability scan (pip-audit), and a secret scan
-  (gitleaks). No AWS credentials anywhere in this file — nothing to withhold from a
-  fork PR, by construction (ADR-026).
+* **`pr.yml`** — every pull request (including from forks) *and* every push to `main`:
+  lint/format/typecheck, unit+contract tests with coverage, CDK assertion tests, an IaC
+  security scan (cdk-nag + cfn-lint), a dependency vulnerability scan (pip-audit), and a
+  secret scan (gitleaks). No AWS credentials anywhere in this file — nothing to withhold
+  from a fork PR, by construction (ADR-026); the push trigger doesn't change that, since
+  a fork can never push to this repository's `main` regardless.
 * **`deploy.yml`** — triggered by a push to `main` (i.e. after a PR merges) or manually
   via "Run workflow". Deploys `ModelRouter-dev` automatically, then `ModelRouter-prod`
   only after a human approves the `prod` Environment's protection rule.
@@ -74,9 +75,13 @@ Settings → Branches → add a rule for `main`:
 * Do not allow direct pushes to `main` (no bypass for admins, if you want the rule to
   actually hold).
 
-This is what makes ADR-026's separation meaningful in practice: without it, someone
-could push directly to `main` without ever running `pr.yml`, triggering `deploy.yml`
-with unreviewed code.
+This is what makes ADR-026's separation a real *gate*, not just a signal: `pr.yml` now
+also runs on every push to `main` (so a direct push is never left unvalidated), but
+without this branch-protection rule that validation happens *after* the push, not
+before — `deploy.yml` can still fire on unreviewed code that later turns out to fail
+`pr.yml`'s checks. Only "required status checks" + "no direct pushes" turns `pr.yml`
+into something that blocks a bad change from ever reaching `main`, rather than merely
+reporting on it once it's already there.
 
 ## Before pushing: run the same checks locally
 

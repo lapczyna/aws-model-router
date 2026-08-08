@@ -24,9 +24,8 @@ only `main` is supported, no maintained release branches), so:
 ## Cutting a release
 
 1. Confirm `main` is green: `make ci` locally (equivalent to `black --check .`,
-   `ruff check .`, `mypy`, `pytest`), and CI passing on GitHub
-   (`.github/workflows/pr.yml`'s checks, run again on the `push`-to-main trigger in
-   `deploy.yml` — see `docs/operations/ci-cd.md`).
+   `ruff check .`, `mypy`, `pytest`), and CI passing on GitHub (`.github/workflows/pr.yml`
+   also runs on every push to `main`, not just PRs — see `docs/operations/ci-cd.md`).
 2. Bump `version` in `pyproject.toml` in its own commit
    (`chore: bump version to 0.x.0`).
 3. Tag the commit: `git tag -a v0.x.0 -m "v0.x.0 — <one-line summary>"`.

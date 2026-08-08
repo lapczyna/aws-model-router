@@ -1,13 +1,22 @@
-name: PR validation
+name: CI
 
-# Runs on every pull request, including from forks. Deliberately has no `id-token`
-# permission and requests no AWS credentials anywhere in this file (ADR-026) — a fork
-# PR gets byte-for-byte the same checks as a same-repo PR, with zero ability to reach
-# AWS or repository secrets. Deployment lives entirely in deploy.yml, triggered only by
-# a push to main, never by pull_request.
+# Runs on every pull request, including from forks, and on every push to main (direct
+# pushes are this project's current workflow -- see PROJECT_PLAN.md -- so this is what
+# actually validates main itself, not just PRs against it; a CI status badge tied only
+# to pull_request would reflect whatever PR last happened to run, not main's real state).
+# Deliberately has no `id-token` permission and requests no AWS credentials anywhere in
+# this file (ADR-026) — a fork PR gets byte-for-byte the same checks as a same-repo PR,
+# with zero ability to reach AWS or repository secrets, and the added push trigger can't
+# weaken that: a fork can never push to this repository's main branch in the first place.
+# Deployment lives entirely in deploy.yml, also triggered by a push to main, but with
+# every job requesting id-token: write -- kept in a separate file regardless (ADR-026),
+# since that's what makes "this file has no AWS credential path" a fact about the file
+# itself, not something that happens to be true of its current trigger set.
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 permissions:

@@ -16,7 +16,8 @@ design doesn't fight them.
 ## Decision
 Two entirely separate workflow files, triggered by disjoint events:
 
-* **`pr.yml`** — trigger: `pull_request` only (`branches: [main]`). Top-level
+* **`pr.yml`** — trigger: `pull_request` (`branches: [main]`) **and** `push`
+  (`branches: [main]`, added later — see Consequences). Top-level
   `permissions: contents: read`. No job requests `id-token: write`. No step references
   any AWS credential, role ARN, or secret beyond the default `GITHUB_TOKEN` (used only
   by `gitleaks-action` for its own API calls, not AWS). Every check (lint, typecheck,
@@ -50,6 +51,17 @@ every `main` push would undermine the point of continuous deployment to it.
   names, no direct pushes — `docs/operations/ci-cd.md`) is what actually prevents an
   unreviewed change from ever reaching `deploy.yml` — this ADR's separation is
   necessary but not sufficient without that repository setting also being enabled.
+* **`pr.yml` gained a `push: branches: [main]` trigger alongside `pull_request`**, added
+  once this project's actual practice (direct pushes to `main`, not PR-gated merges —
+  `PROJECT_PLAN.md`) made it clear no branch-protection gate was actually enforcing the
+  "PR checks pass before `main` changes" property the previous bullet describes. This is
+  strictly an *addition*, not a replacement: it gives after-the-fact validation of every
+  direct push (and a CI status badge something honest to reflect) without requiring the
+  PR-gated flow this project has explicitly chosen not to adopt yet. It does not touch
+  this ADR's actual security property — a fork can never push to this repository's `main`
+  regardless, so the set of things a fork can trigger is unchanged. Real, pre-merge
+  gating of `main` still requires the branch-protection setup this ADR always described;
+  this addition only makes the *absence* of that gate less silent.
 * A maintainer merging a PR is the only path to a `dev` deployment; a maintainer
   approving the `prod` Environment gate is the only path to a `prod` deployment. Neither
   requires (or grants) the other workflow file's capabilities.
