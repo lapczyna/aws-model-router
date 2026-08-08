@@ -62,26 +62,31 @@ reviewers** → add yourself (or your team). This is what pauses `deploy-prod` i
 makes the rule apply; there is no equivalent gate on `dev` (deliberately — see
 ADR-026).
 
-### 4. Branch protection on `main`
+### 4. Branch protection on `main` — enabled
 
-Settings → Branches → add a rule for `main`:
+Settings → Branches → rule for `main` (applied via the API, `gh api --method PUT
+repos/{owner}/{repo}/branches/main/protection`, so the exact settings below are what's
+actually live, not just a recommendation):
 
-* Require a pull request before merging (require at least one approval).
-* Require status checks to pass before merging — select `pr.yml`'s six job names
+* Require a pull request before merging.
+* **0** required approving reviews, not 1: this is a solo-maintained repository, and
+  GitHub never counts a PR author's own approval toward the requirement — requiring 1
+  would permanently lock the owner out of merging anything, since no second reviewer
+  exists. If a second collaborator ever joins, revisit this.
+* Require status checks to pass before merging — `pr.yml`'s six job names
   (`Lint, format, typecheck`, `Unit + contract tests (coverage)`,
   `CDK assertion tests`, `IaC security scan (cdk-nag + cfn-lint)`,
-  `Dependency vulnerability scan (pip-audit)`, `Secret scan (gitleaks)`).
-* Require branches to be up to date before merging.
-* Do not allow direct pushes to `main` (no bypass for admins, if you want the rule to
-  actually hold).
+  `Dependency vulnerability scan (pip-audit)`, `Secret scan (gitleaks)`), strict mode
+  (branches must be up to date before merging).
+* No direct pushes to `main`, `enforce_admins: true` — no bypass, including for the
+  repo owner. Force-pushes and branch deletion are also blocked.
 
-This is what makes ADR-026's separation a real *gate*, not just a signal: `pr.yml` now
-also runs on every push to `main` (so a direct push is never left unvalidated), but
-without this branch-protection rule that validation happens *after* the push, not
-before — `deploy.yml` can still fire on unreviewed code that later turns out to fail
-`pr.yml`'s checks. Only "required status checks" + "no direct pushes" turns `pr.yml`
-into something that blocks a bad change from ever reaching `main`, rather than merely
-reporting on it once it's already there.
+This is what makes ADR-026's separation a real *gate*, not just a signal: `pr.yml` also
+runs on every push to `main` (so if this rule were ever disabled, a direct push still
+wouldn't go unvalidated), but it's this branch-protection rule — not the push trigger —
+that stops unreviewed code from reaching `main`, and therefore `deploy.yml`, in the
+first place. The push trigger is after-the-fact validation; this rule is the actual
+pre-merge gate.
 
 ## Before pushing: run the same checks locally
 
