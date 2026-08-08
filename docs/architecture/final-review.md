@@ -73,10 +73,15 @@ These are not oversights — each has a written rationale in its ADR/threat-mode
   Phase 9's sample-policy review; see `policies/README.md`) — both are exercised in code
   (`scripts/run_demo_scenarios.py`, `tests/unit/domain/test_strategy.py`), just not as a
   shipped example YAML.
-* **CI/CD deploys directly from `main`**, not via a PR-gated release branch (an explicit
-  choice made in Phase 8, not a placeholder) — see
+* **CI/CD deploys directly from `main`** (no separate PR-gated release branch) once a
+  pull request merges — through Phase 8 this ran without branch protection enabled at
+  all (an explicit choice, not a placeholder); see
   [ADR-026](../adr/0026-pr-and-deploy-workflow-separation.md) for why the PR/deploy
-  workflow separation makes this safe even without branch protection.
+  workflow separation was designed to be safe either way, since a fork PR never had a
+  credential path to exploit regardless of whether branch protection gated `main`.
+  Branch protection is now enabled ([PR #15](https://github.com/lapczyna/aws-model-router/pull/15)) — a pull request and all six `pr.yml` checks passing are required
+  before anything reaches `main`, closing the gap that ADR-026's design never depended
+  on but also never closed on its own.
 
 ## Multi-perspective self-review
 

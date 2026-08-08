@@ -88,6 +88,11 @@ that stops unreviewed code from reaching `main`, and therefore `deploy.yml`, in 
 first place. The push trigger is after-the-fact validation; this rule is the actual
 pre-merge gate.
 
+The doc updates recording this change were themselves the first change merged through
+the resulting flow: [PR #15](https://github.com/lapczyna/aws-model-router/pull/15)
+(`ebfff0c`) — branch, PR, all six checks green, merge — not a direct push, since by the
+time it was opened, a direct push was no longer possible.
+
 ## Before pushing: run the same checks locally
 
 ```bash
