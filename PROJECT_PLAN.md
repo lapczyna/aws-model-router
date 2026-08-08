@@ -669,15 +669,18 @@ incorrect:
 * **Test count after Phase 7**: 313 tests in the default `pytest` run (up from 303 after
   Phase 6 — 10 new abuse-case tests), plus 39 opt-in CDK assertion tests (`pytest -m
   infra`, up from 38 — 1 new for the tightened DynamoDB IAM grants).
-* **Resolved: direct-to-`main` commits continue for now** — every phase 1–8 commit has
-  gone directly to `main`; there has never been a pull request in this repository's
-  history. Asked explicitly at the end of Phase 8, the user chose to keep committing
-  directly to `main` rather than switch to a PR-based flow. `pr.yml` therefore remains a
-  documented, ready-to-adopt path (every command in it independently verified to pass
-  locally) rather than an actively enforced gate — it has not yet been exercised as a
-  real GitHub-hosted workflow run. Revisit if/when the user decides to adopt PRs; the
-  branch-protection recommendations in `docs/operations/ci-cd.md` describe exactly what
-  to enable at that point.
+* **Superseded: direct-to-`main` commits, then switched to a PR-gated flow.** Every
+  Phase 1–8 commit (and everything through the repo going public and Phase 10c) went
+  directly to `main` — a deliberate choice, made explicitly at the end of Phase 8. Once
+  the repo went public and `pr.yml` gained a `push`-to-`main` trigger (so it could
+  actually validate `main`, not just PRs — see ADR-026's amendment), branch protection
+  was enabled on `main`: a pull request is required for every change (CI's six job names
+  as required status checks, branches must be up to date, force-pushes and deletion
+  blocked, `enforce_admins: true` — no bypass, including for the repo owner). Required
+  approving reviews are set to **0**, not 1: this is a solo-maintained repo, and GitHub
+  never counts a PR author's own approval, so requiring 1 would have permanently locked
+  the owner out of merging anything. `docs/operations/ci-cd.md` documents the exact
+  settings applied.
 * **cfn-lint caught a real bug cdk-nag did not** (ADR-027): `AWS::CloudWatch::Dashboard`
   (Phase 6's `ObservabilityConstruct`) was being tagged by the stack-wide
   `Tags.of(stack).add(...)` calls, but CloudFormation's resource schema for that

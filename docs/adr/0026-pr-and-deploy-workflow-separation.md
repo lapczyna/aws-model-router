@@ -47,21 +47,22 @@ gate: `dev` is `RemovalPolicy.DESTROY`, cheap to redeploy, and losing fast feedb
 every `main` push would undermine the point of continuous deployment to it.
 
 ## Consequences
-* Branch protection on `main` (required status checks referencing `pr.yml`'s job
-  names, no direct pushes — `docs/operations/ci-cd.md`) is what actually prevents an
-  unreviewed change from ever reaching `deploy.yml` — this ADR's separation is
-  necessary but not sufficient without that repository setting also being enabled.
-* **`pr.yml` gained a `push: branches: [main]` trigger alongside `pull_request`**, added
-  once this project's actual practice (direct pushes to `main`, not PR-gated merges —
-  `PROJECT_PLAN.md`) made it clear no branch-protection gate was actually enforcing the
-  "PR checks pass before `main` changes" property the previous bullet describes. This is
-  strictly an *addition*, not a replacement: it gives after-the-fact validation of every
-  direct push (and a CI status badge something honest to reflect) without requiring the
-  PR-gated flow this project has explicitly chosen not to adopt yet. It does not touch
-  this ADR's actual security property — a fork can never push to this repository's `main`
-  regardless, so the set of things a fork can trigger is unchanged. Real, pre-merge
-  gating of `main` still requires the branch-protection setup this ADR always described;
-  this addition only makes the *absence* of that gate less silent.
+* **Branch protection on `main` is now enabled** (required status checks referencing
+  `pr.yml`'s six job names, no direct pushes, `enforce_admins: true` — exact settings in
+  `docs/operations/ci-cd.md`) — this is what actually prevents an unreviewed change from
+  ever reaching `deploy.yml`; this ADR's file separation is necessary but was not
+  sufficient on its own until this repository setting was also turned on. Required
+  approving reviews are **0**, not the more typical 1+: this is a solo-maintained repo,
+  and GitHub never counts a PR author's own approval, so requiring 1 would have
+  permanently locked the owner out of merging anything.
+* **`pr.yml` also gained a `push: branches: [main]` trigger alongside `pull_request`**,
+  added shortly before branch protection itself, back when this project's practice was
+  still direct pushes to `main` (`PROJECT_PLAN.md`) and no gate was enforcing the "PR
+  checks pass before `main` changes" property at all. It remains useful even now that
+  the branch-protection gate above is the actual enforcement mechanism: it's what gives
+  a CI status badge something to reflect, and it doesn't touch this ADR's security
+  property either way — a fork can never push to this repository's `main` regardless of
+  whether the trigger exists.
 * A maintainer merging a PR is the only path to a `dev` deployment; a maintainer
   approving the `prod` Environment gate is the only path to a `prod` deployment. Neither
   requires (or grants) the other workflow file's capabilities.
