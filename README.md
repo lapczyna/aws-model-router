@@ -1,5 +1,9 @@
 # aws-model-router
 
+[![License: MIT](https://img.shields.io/github/license/lapczyna/aws-model-router)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
+[![AWS CDK](https://img.shields.io/badge/AWS%20CDK-v2-orange.svg)](infrastructure/)
+
 A serverless, policy-driven **model routing platform** on AWS. Applications never call a
 foundation model directly — they send inference requests to a centralized Model Router,
 which decides which approved model handles each request based on configurable policy:
