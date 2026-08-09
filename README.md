@@ -1,9 +1,19 @@
 # aws-model-router
 
 [![CI](https://github.com/lapczyna/aws-model-router/actions/workflows/pr.yml/badge.svg)](https://github.com/lapczyna/aws-model-router/actions/workflows/pr.yml)
+[![Deploy](https://github.com/lapczyna/aws-model-router/actions/workflows/deploy.yml/badge.svg)](https://github.com/lapczyna/aws-model-router/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/github/license/lapczyna/aws-model-router)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 [![AWS CDK](https://img.shields.io/badge/AWS%20CDK-v2-orange.svg)](infrastructure/)
+
+> **The Deploy badge above is expected to show failing.** This is a reference
+> implementation, not a hosted service — the OIDC deploy role
+> ([ADR-025](docs/adr/0025-github-oidc-deploy-role-design.md)) is documented but was
+> never provisioned against a real AWS account, so every `deploy.yml` run fails at the
+> `configure-aws-credentials` step (`Could not assume role with OIDC: Request ARN is
+> invalid`) — there's no AWS account ID behind it, not a code defect. `pr.yml`'s CI badge
+> above is the one that reflects code health; see [`docs/operations/ci-cd.md`](docs/operations/ci-cd.md)
+> for what a real deployment requires.
 
 A serverless, policy-driven **model routing platform** on AWS. Applications never call a
 foundation model directly — they send inference requests to a centralized Model Router,
