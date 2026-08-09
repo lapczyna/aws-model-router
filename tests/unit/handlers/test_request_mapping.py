@@ -37,8 +37,7 @@ def test_parse_json_body_parses_numbers_as_decimal_not_float() -> None:
 
 
 def test_parse_inference_request_full_payload() -> None:
-    body = parse_json_body(
-        """
+    body = parse_json_body("""
         {
             "applicationId": "support-assistant",
             "messages": [{"role": "user", "content": "hello"}],
@@ -55,8 +54,7 @@ def test_parse_inference_request_full_payload() -> None:
             "idempotencyKey": "key-1",
             "metadata": {"useCase": "incident-summary"}
         }
-        """
-    )
+        """)
 
     request = parse_inference_request(body)
 
