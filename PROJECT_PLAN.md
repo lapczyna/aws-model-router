@@ -669,21 +669,56 @@ incorrect:
 * **Test count after Phase 7**: 313 tests in the default `pytest` run (up from 303 after
   Phase 6 — 10 new abuse-case tests), plus 39 opt-in CDK assertion tests (`pytest -m
   infra`, up from 38 — 1 new for the tightened DynamoDB IAM grants).
-* **Superseded: direct-to-`main` commits, then switched to a PR-gated flow.** Every
-  Phase 1–8 commit (and everything through the repo going public and Phase 10c) went
-  directly to `main` — a deliberate choice, made explicitly at the end of Phase 8. Once
-  the repo went public and `pr.yml` gained a `push`-to-`main` trigger (so it could
-  actually validate `main`, not just PRs — see ADR-026's amendment), branch protection
-  was enabled on `main`: a pull request is required for every change (CI's six job names
-  as required status checks, branches must be up to date, force-pushes and deletion
-  blocked, `enforce_admins: true` — no bypass, including for the repo owner). Required
-  approving reviews are set to **0**, not 1: this is a solo-maintained repo, and GitHub
-  never counts a PR author's own approval, so requiring 1 would have permanently locked
-  the owner out of merging anything. `docs/operations/ci-cd.md` documents the exact
-  settings applied. The doc updates recording this were themselves the first change
-  merged through the new flow —
-  [PR #15](https://github.com/lapczyna/aws-model-router/pull/15) (`ebfff0c`), branch →
-  PR → all six checks green → merge, not a direct push.
+* **Portfolio-readiness CI hardening, after Phase 10c and going public** — a cluster of
+  related fixes and one policy decision, roughly in order:
+  * `secret-scan`'s `gitleaks-action` was failing on every PR (`403 Resource not
+    accessible by integration` on `GET /pulls/{n}/commits`) because the job lacked
+    `pull-requests: read` — the exact scope that call needs, confirmed from the API's own
+    `x-accepted-github-permissions` response header, not guessed. Fixed by scoping that
+    permission to just the `secret-scan` job, not workflow-wide.
+  * A `black` formatting break had landed on `main` unnoticed, because `pr.yml` only ran
+    on `pull_request`, never `push` — exactly the gap the push-trigger change below
+    closes. Fixed directly once found.
+  * Dependabot's `cdk-nag` bump (`>=2.35,<4.0`) was declined, not merged: cdk-nag 3.0
+    replaces its Aspect-based API with an explicitly `:stability: experimental`
+    `PolicyValidationPlugin` model, confirmed empirically to crash `cdk synth` outright
+    (`aspectApplication.aspect.visit is not a function`) before any suppression code even
+    runs — not a drop-in bump. `cdk-nag` stays capped `<3.0` in `pyproject.toml`
+    (documented inline) with a Dependabot `ignore` rule so the same major bump isn't
+    re-proposed weekly.
+  * **Superseded: direct-to-`main` commits, then switched to a PR-gated flow.** Every
+    Phase 1–8 commit (and everything through the repo going public and Phase 10c) went
+    directly to `main` — a deliberate choice, made explicitly at the end of Phase 8. Once
+    the repo went public and `pr.yml` gained a `push`-to-`main` trigger (so it could
+    actually validate `main`, not just PRs — see ADR-026's amendment), branch protection
+    was enabled on `main`: a pull request is required for every change (CI's six job
+    names as required status checks, branches must be up to date, force-pushes and
+    deletion blocked, `enforce_admins: true` — no bypass, including for the repo owner).
+    Required approving reviews are set to **0**, not 1: this is a solo-maintained repo,
+    and GitHub never counts a PR author's own approval, so requiring 1 would have
+    permanently locked the owner out of merging anything. `docs/operations/ci-cd.md`
+    documents the exact settings applied. The doc updates recording this were themselves
+    the first change merged through the new flow —
+    [PR #15](https://github.com/lapczyna/aws-model-router/pull/15) (`ebfff0c`), branch →
+    PR → all six checks green → merge, not a direct push.
+  * README badges added once the repo was public (meaningless to external viewers on a
+    private repo): CI, License, Python 3.12, AWS CDK v2. A CI-workflow badge tied only to
+    `pull_request` was tried first and found misleading — it reflected whichever PR
+    happened to run last (confirmed by observing it show "failing" from a declined
+    cdk-nag PR, not from `main`), which is what motivated the push-trigger change above.
+    A Deploy badge was added last, deliberately paired with an inline README caveat that
+    it's *expected* to show failing — no real AWS account was ever provisioned behind the
+    documented OIDC role (ADR-025), so `configure-aws-credentials` fails every run; not a
+    code defect, and left out entirely at first specifically to avoid implying one.
+  * Once branch protection made every merge go through CI, the 13 Dependabot PRs open
+    since Phase 10a/b needed to be cleared through the new flow rather than left stale:
+    each recreated/rebased against current `main`; real `pyproject.toml` conflicts
+    between simultaneous dev-tooling bumps (`pytest-cov` vs. `pytest`, `mypy` vs.
+    `black`/`pre-commit`) resolved by hand, keeping both bumps each time; the `black`
+    reformat fix reapplied twice, since Dependabot's "recreate" discards manually-pushed
+    commits and starts the branch over. All 12 mergeable PRs merged (6 GitHub Actions
+    version bumps, plus `pytest`, `pytest-cov`, `pre-commit`, `mypy`, `black`, `openai`);
+    the 13th (`cdk-nag`) stays closed per the decision above.
 * **cfn-lint caught a real bug cdk-nag did not** (ADR-027): `AWS::CloudWatch::Dashboard`
   (Phase 6's `ObservabilityConstruct`) was being tagged by the stack-wide
   `Tags.of(stack).add(...)` calls, but CloudFormation's resource schema for that
