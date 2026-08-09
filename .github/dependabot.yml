@@ -25,6 +25,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # cdk-nag 3.x replaces its Aspect-based API with an experimental
+    # PolicyValidationPlugin model (Validations.of(app).add_plugins(...) /
+    # .acknowledge(...)) -- not a drop-in bump. pyproject.toml already caps it
+    # below 3.0; this stops Dependabot from re-proposing the same major-version PR
+    # every week regardless. Revisit once cdk-nag 3.x stabilizes (see PR #11).
+    ignore:
+      - dependency-name: "cdk-nag"
+        update-types: ["version-update:semver-major"]
     labels:
       - "dependencies"
 

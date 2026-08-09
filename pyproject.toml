@@ -51,6 +51,13 @@ dev = [
 infra = [
     "aws-cdk-lib>=2.150,<3.0",
     "constructs>=10.3,<11.0",
+    # Capped below 3.0 deliberately: v3 replaces the Aspect-based API
+    # (Aspects.of(app).add(...), NagSuppressions.add_resource_suppressions(...))
+    # with an experimental PolicyValidationPlugin model
+    # (Validations.of(app).add_plugins(...) / Validations.of(construct).acknowledge(...),
+    # every relevant method marked `:stability: experimental`) -- not a drop-in
+    # version bump. Revisit once cdk-nag 3.x stabilizes out of experimental status
+    # (see PR #11, closed rather than migrated to an unstable API).
     "cdk-nag>=2.35,<3.0",
 ]
 

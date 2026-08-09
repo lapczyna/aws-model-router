@@ -125,7 +125,7 @@ test of the same guarantee Demonstration 8 shows in the positive case. See
 cd infrastructure
 CDK_NAG_ENABLED=true cdk synth -c env=dev --quiet
 pip install "cfn-lint>=1.0,<2.0"
-cfn-lint --ignore-checks W3005 --template cdk.out/ModelRouter-dev.template.json
+cfn-lint --ignore-checks W3005 W3037 --template cdk.out/ModelRouter-dev.template.json
 ```
 
 Reproduces the exact CI check (`.github/workflows/pr.yml`'s `iac-security-scan` job)

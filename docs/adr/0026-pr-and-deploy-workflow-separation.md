@@ -16,7 +16,8 @@ design doesn't fight them.
 ## Decision
 Two entirely separate workflow files, triggered by disjoint events:
 
-* **`pr.yml`** — trigger: `pull_request` only (`branches: [main]`). Top-level
+* **`pr.yml`** — trigger: `pull_request` (`branches: [main]`) **and** `push`
+  (`branches: [main]`, added later — see Consequences). Top-level
   `permissions: contents: read`. No job requests `id-token: write`. No step references
   any AWS credential, role ARN, or secret beyond the default `GITHUB_TOKEN` (used only
   by `gitleaks-action` for its own API calls, not AWS). Every check (lint, typecheck,
@@ -46,10 +47,25 @@ gate: `dev` is `RemovalPolicy.DESTROY`, cheap to redeploy, and losing fast feedb
 every `main` push would undermine the point of continuous deployment to it.
 
 ## Consequences
-* Branch protection on `main` (required status checks referencing `pr.yml`'s job
-  names, no direct pushes — `docs/operations/ci-cd.md`) is what actually prevents an
-  unreviewed change from ever reaching `deploy.yml` — this ADR's separation is
-  necessary but not sufficient without that repository setting also being enabled.
+* **Branch protection on `main` is now enabled** (required status checks referencing
+  `pr.yml`'s six job names, no direct pushes, `enforce_admins: true` — exact settings in
+  `docs/operations/ci-cd.md`) — this is what actually prevents an unreviewed change from
+  ever reaching `deploy.yml`; this ADR's file separation is necessary but was not
+  sufficient on its own until this repository setting was also turned on. Required
+  approving reviews are **0**, not the more typical 1+: this is a solo-maintained repo,
+  and GitHub never counts a PR author's own approval, so requiring 1 would have
+  permanently locked the owner out of merging anything. The doc updates recording this
+  were themselves the first change merged through the resulting flow —
+  [PR #15](https://github.com/lapczyna/aws-model-router/pull/15) (`ebfff0c`), branch →
+  PR → all six checks green → merge, not a direct push.
+* **`pr.yml` also gained a `push: branches: [main]` trigger alongside `pull_request`**,
+  added shortly before branch protection itself, back when this project's practice was
+  still direct pushes to `main` (`PROJECT_PLAN.md`) and no gate was enforcing the "PR
+  checks pass before `main` changes" property at all. It remains useful even now that
+  the branch-protection gate above is the actual enforcement mechanism: it's what gives
+  a CI status badge something to reflect, and it doesn't touch this ADR's security
+  property either way — a fork can never push to this repository's `main` regardless of
+  whether the trigger exists.
 * A maintainer merging a PR is the only path to a `dev` deployment; a maintainer
   approving the `prod` Environment gate is the only path to a `prod` deployment. Neither
   requires (or grants) the other workflow file's capabilities.
