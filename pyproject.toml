@@ -28,7 +28,7 @@ classifiers = [
 # groups below, never bundled into the Lambda package.
 dependencies = [
     "boto3>=1.34.116,<2.0",
-    "openai>=1.30,<3.0",
+    "openai>=1.30,<4.0",
     "opentelemetry-api>=1.30,<2.0",
     "opentelemetry-exporter-otlp-proto-http>=1.30,<2.0",
     "opentelemetry-sdk>=1.30,<2.0",
